@@ -250,9 +250,61 @@ class ImpliedVolatilityDashboard:
     
     
     def process_implied_volatility(self):
-        pass
+        if self.equity_data is None:
+            return
+        
+        self.log_message("Processing iVol Data")
+        
+        self.equity_data["implied_vol"] = self.equity_data["close"] * np.sqrt(self.vol_annualization)
+        
+        self.equity_data["iv_percentile"] = self.equity_data["implied_vol"].rolling(window=252).rank(pct=True)
+        self.current_implied_vol = self.equity_data["implied_vol"].iloc[-1] if len(self.equity_data) > 0 else None
+        
+        self.volatility_data = self.equity_data[["implied_vol", "iv_percentile"]].copy()
+        
+        self.update_current_vol_display(self)
+        
+        if self.current_implied_vol is not None:
+            self.log_message(f"Current IVol: {self.current_implied_vol:.4f} ({self.current_implied_vol*100:.2f}%)")
+            self.log_message(f"IV_range: {self.equity_data["implied_vol"].min():.4f} - {self.equity_data["implied_vol"].max():.4f}")
+        else:
+            self.log_message("failed to process IVol data")
+            
+            
     def update_current_vol_display(self):
-        pass
+        if self.current_implied_vol is not None:
+            self.current_vol_label.config(f"{self.current_implied_vol*100:.4f}%")
+            comp_text = "Annualized by root 252 factor"
+            self.vol_computation_label.config(text = comp_text)
+            
+            if self.equity_data is not None:
+                vol_min = self.equity_data["implied_vol"].min()
+                vol_max = self.equity_data["implied_vol"].max()
+                vol_mean = self.equity_data["implied_vol"].mean()
+                range_text = f"MIN: {vol_min:.3f}| MAX: {vol_max:.3f}| MEAN: {vol_mean:.3f}"
+            else:
+                range_text = "N/A"
+                
+            self.vol_range_label.config(text=range_text)
+            
+            if self.current_implied_vol >= 0.4:
+                self.current_vol_label.config(foreground="red")
+            if self.current_implied_vol <= 0.15:
+                self.current_vol_label.config(foreground="green")
+            else:
+                self.current_vol_label.config(foreground="black")
+                
+            self.update_regime_analysis()
+            
+        else:
+            self.current_vol_label.config(text="N/A", foreground="black")
+            self.vol_computation_label.config(text="No Data")
+            self.vol_range_label.config(text="N/A", foreground="black")
+            self.regieme_label.config(text="N/A", foreground="black")
+            self.percentile_label.config(text="N/A", foreground="black")
+            self.reversion_label.config(text="N/A", foreground="black")
+
+             
     def update_regime_analysis(self):
         pass
     def analyze_volatility(self):
