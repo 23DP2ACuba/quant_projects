@@ -382,5 +382,37 @@ class ImpliedVolatilityDashboard:
         else:
             intersection_x = analysis_df["current_vol"].median()
             
+        high_vol_regieme = analysis_df["current_vol"] > intersection_x
+        low_vol_regieme = analysis_df["current_vol"] <= intersection_x
+        
+        if high_vol_regieme.sum() > 10:
+            slope_high, intercept_high, r_value_high, p_value_high, std_error_high = stats.linregress(
+                analysis_df.loc[high_vol_regieme, "current_vol"], analysis_df.loc[high_vol_regieme, "vol_diff"]
+            )   
+        else:
+            slope_high = intercept_high = r_value_high = p_value_high = std_error_high = None
+            
+        
+        if low_vol_regieme.sum() > 10:
+            slope_low, intercept_low, r_value_low, p_value_low, std_error_low = stats.linregress(
+                analysis_df.loc[low_vol_regieme, "current_vol"], analysis_df.loc[low_vol_regieme, "vol_diff"]
+            ) 
+        else:
+            slope_low = intercept_low = r_value_low = p_value_low = std_error_low = None
+            
+        
+        self.ax1.clear()
+        self.ax2.clear()
+        self.ax3.clear()
+        
+        self.ax1.scatter(analysis_df['current_vol'], analysis_df['forward_vol'], alpha=.6, s=20)
+        
+        x_range = np.linspace(analysis_df['current_vol'].min(), analysis_df['current_vol'].max(), 100)
+        y_pred1 = slope1 * x_range + intercept1
+        
+        self.ax1.plot(x_range, y_pred1, "r-", linewidth=2, label=f"Regression R**2 = {r_value1**2:.3f}")
+        
+        min_val = min(analysis_df['current_vol'].min(), analysis_df['forward_vol'].min())
+        
         
         
