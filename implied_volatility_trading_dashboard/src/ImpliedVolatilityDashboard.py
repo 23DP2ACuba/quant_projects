@@ -11,6 +11,7 @@ from datetime import datetime
 import warnings
 from utils import DisplayUtils
 from IBApp import IBApp
+from scipy import stats
 
 warnings.filterwarnings('ignore')
 
@@ -306,6 +307,80 @@ class ImpliedVolatilityDashboard:
 
              
     def update_regime_analysis(self):
-        pass
+        if self.volatility_data is None or self.current_implied_vol is None:
+            return
+        
+        current_percentile = self.volatility_data["iv_percentile"].iloc[-1]
+        
+        if current_percentile > .8:
+            regieme = "HIGH iVOL"
+            color = "red"
+            
+        elif current_percentile > 0.6:
+            regieme = "ABOVE AVG iVOL"
+            color = "orange"
+            
+        elif current_percentile >.4:
+            regieme ="NOMAL iVOL"
+            color = "black"
+            
+        elif current_percentile > .2:
+            regieme ="BELOW AVG iVOL"
+            color = "blue"
+        else:
+            regieme = "LOW iVOL"
+            color = "green"
+        
+        self.regieme_label.config(text=regieme, foreground=color)
+        self.percentile_label.config(text=f"{current_percentile:.1f}%")
+        
+        if current_percentile > .8:
+            rev = "Expect MR down"
+            rcolor = "red"
+            
+        elif current_percentile > .8:
+            rev = "Expect MR up"
+            rcolor = "green"
+            
+        else:
+            rev = "No reversion expected"
+            rcolor = "black"
+        
+        self.regieme_label.config(text=rev, foreground=rcolor)
+        
+         
     def analyze_volatility(self):
-        pass
+        if self.equity_data is None or self.volatility_data is None:
+            messagebox.showerror("Error", "No iVol data is available for analysis")
+            return
+        
+        self.log_message("Analyze iVol data")
+        
+        vol_forward_30d = self.volatility_data["implied_vol"].rolling(window=30, min_periods=1).mean().shift(-30)
+        
+        analysis_df = pd.DataFrame({
+            "current_vol": self.volatility_data["implied_vol"],
+            "forward_vol": vol_forward_30d,
+            "vol_diff": vol_forward_30d - self.volatility_data["implied_vol"],
+            "vol_percentile": self.volatility_data["iv_percentile"]
+        })
+        analysis_df.dropna(inplace=True)
+        
+        if len(analysis_df) <= 30:
+            self.log_message("Insufficient iVol data for Analysis")
+            
+        slope1, intercept1, r_value1, p_value1, std_error1 = stats.linregress(
+            analysis_df["current_vol"], analysis_df["forward_vol"]
+        ) 
+        
+        slope2, intercept2, r_value2, p_value2, std_error2 = stats.linregress(
+            analysis_df["current_vol"], analysis_df["vol_ciff"]
+        ) 
+        
+        if slope1 != 1:
+            intersection_x = intercept1 / (1-slope1)
+        else:
+            intersection_x = analysis_df["current_vol"].median()
+            
+        
+        
