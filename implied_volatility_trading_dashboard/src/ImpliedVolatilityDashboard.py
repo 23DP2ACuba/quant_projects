@@ -1,7 +1,5 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
-import threading
-import time
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,11 +13,12 @@ from scipy import stats
 
 warnings.filterwarnings('ignore')
 
-class ImpliedVolatilityDashboard:
+class ImpliedVolatilityDashboard(DisplayUtils):
     def __init__(self, root):
+        super().__init__()
         self.root = root
         self.root.title("Implied Vol Dashboard")
-        self.root.geometey("1400x1200")
+        self.root.geometry("1200x800")
         
         self.option_data = None
         self.volatility_data = None
@@ -44,51 +43,63 @@ class ImpliedVolatilityDashboard:
         main_frame = ttk.Frame(self.root, padding = "10")
         main_frame.grid(row = 0, column = 0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        self.root.columncofig(0, weight=1)
-        self.root.rowcofig(0, weight=1)
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
         
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(5, weight=1)
         
-        conn_frame = ttk.LabelFrame(main_frame, text ="IB connection", padding="10")
-        conn_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady = (0, 10))
+        conn_frame = ttk.LabelFrame(main_frame,
+                                    text ="IB connection",
+                                    padding="10")
+        conn_frame.grid(row=0, column=0, columnspan=2,
+                        sticky=(tk.W, tk.E), pady = (0, 10))
         
         ttk.Label(conn_frame, text="Host:").grid(row=0, column=0, padx=(0, 5))
         self.host_var = tk.StringVar(value="127.0.0.1")
-        ttk.Entry(conn_frame, textvariable=self.host_var, width=15).grid(row=0, column=1, padx=(0, 10))
+        ttk.Entry(conn_frame, textvariable=self.host_var, width=15)\
+            .grid(row=0, column=1, padx=(0, 10))
         
         ttk.Label(conn_frame, text="Port:").grid(row=0, column=0, padx=(0, 5))
         self.port_var = tk.StringVar(value="7497")
-        ttk.Entry(conn_frame, textvariable=self.port_var, width=10).grid(row=0, column=3, padx=(0, 10))
+        ttk.Entry(conn_frame, textvariable=self.port_var, width=10) \
+            .grid(row=0, column=3, padx=(0, 10))
         
-        self.connect_btn = ttk.Button(conn_frame, text="Connect",command=self.connect_ib)
+        self.connect_btn = ttk.Button(conn_frame, text="Connect",
+                                      command=self.connect_ib)
         self.connect_btn.grid(row=0, column=4, padx=(0, 10))
         
-        self.disconnect_btn = ttk.Button(conn_frame, text="Connect",command=self.disconnect_ib,state="disabled")
+        self.disconnect_btn = ttk.Button(conn_frame, text="Disconnect",
+                                         command=self.disconnect_ib,state="disabled")
         self.disconnect_btn.grid(row=0, column=5, padx=(0, 10))
         
-        data_frame = tk.LabelFrame(main_frame, text="Data Querry", paddinx="5")
+        data_frame = ttk.LabelFrame(main_frame, text="Data Querry", padding="5")
         data_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         
         ttk.Label(data_frame, text="Symbol:").grid(row=0, column=0, padx=(0, 5))
         self.symbol_var = tk.StringVar(value="SPY")
-        ttk.Entry(data_frame, textvariable=self.symbol_var, width=10).grid(row=0, column=1, padx=(0, 10))
+        ttk.Entry(data_frame, textvariable=self.symbol_var, width=10) \
+            .grid(row=0, column=1, padx=(0, 10))
         
         ttk.Label(data_frame, text="Duration:").grid(row=0, column=2, padx=(0, 5))
         self.duration_var = tk.StringVar(value="2 Y")
-        ttk.Entry(data_frame, textvariable=self.duration_var, width=10).grid(row=0, column=3, padx=(0, 10))
+        ttk.Entry(data_frame, textvariable=self.duration_var, width=10) \
+            .grid(row=0, column=3, padx=(0, 10))
         
-        self.query_btn = ttk.Button(data_frame, text="Querry IB data",command=self.query_data, state="disabled")
+        self.query_btn = ttk.Button(data_frame, text="Querry IB data",
+                                    command=self.query_data, state="disabled")
         self.query_btn.grid(row=0, column=4, padx=(0, 10))
         
-        self.analyze_btn = ttk.Button(data_frame, text="Analyze IV",command=self.analyze_volatility,state="disabled")
+        self.analyze_btn = ttk.Button(data_frame, text="Analyze IV",
+                                      command=self.analyze_volatility,state="disabled")
         self.analyze_btn.grid(row=0, column=5, padx=(0, 10))
         
         vol_frame = ttk.LabelFrame(main_frame, text="Current IV", padding="5")
         vol_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         ttk.Label(vol_frame, text="Current IV").grid(row=0, column=0, padx=(0, 5))
-        self.current_vol_label = ttk.Label(vol_frame, text="N/A", font=("Arial", 12, "bold"))
+        self.current_vol_label = ttk.Label(vol_frame, text="N/A",
+                                           font=("Arial", 12, "bold"))
         self.current_vol_label.grid(row=0, column=3, padx=(0, 20))
         
         ttk.Label(vol_frame, text="Computation").grid(row=0, column=2, padx=(0, 5))
@@ -99,11 +110,15 @@ class ImpliedVolatilityDashboard:
         self.vol_range_label = ttk.Label(vol_frame, text="N/A", font=("Arial", 10))
         self.vol_range_label.grid(row=0, column=5)    
         
-        regieme_frame = ttk.LabelFrame(main_frame, text = "Volatility Regieme adjusting", padding="5")
+        regieme_frame = ttk.LabelFrame(main_frame,
+                                       text = "Volatility Regieme adjusting",
+                                       padding="5")
         regieme_frame.grid(row=3, column=2, columnspan=2, sticky=(tk.W, tk.E), pady = (0, 10))
         
         ttk.Label(regieme_frame, text="Current Regieme").grid(row=0, column=4, padx=(0, 5))
-        self.regieme_label = ttk.Label(regieme_frame, text="N/A", font=("Arial", 12, "bold"))
+        self.regieme_label = ttk.Label(regieme_frame,
+                                       text="N/A",
+                                       font=("Arial", 12, "bold"))
         self.regieme_label.grid(row=0, column=1, padx = (0,20))    
         
         ttk.Label(regieme_frame, text="Percentile").grid(row=0, column=4, padx=(0, 5))
@@ -121,133 +136,18 @@ class ImpliedVolatilityDashboard:
         self.status_txt.grid(row=0, column=0, sticky=(tk.W, tk.E))
         status_frame.columnconfigure(0, weight=1)
         
-        plot_frame = ttk.LabelFrame(main_frame, text="Implied Volatility, Analysis Results", padding="5")
+        plot_frame = ttk.LabelFrame(main_frame, 
+                                    text="Implied Volatility, Analysis Results", 
+                                    padding="5")
         plot_frame.grid(row=5, column=0, sticky=(tk.N, tk.W, tk.E, tk.S))
         plot_frame.columnconfigure(0, weight=1)
         plot_frame.rowconfigure(0, weight=1)
         
         self.fig, (self.ax1, self.ax2, self.ax3) = plt.subplots(1, 3, figsize=(18, 6))
         self.canvas = FigureCanvasTkAgg(self.fig, plot_frame)
-        self.canvas.get_tk_widget().grid(row=1, column=0, sticky=(tk.N, tk.W, tk.E, tk.S)) 
-        
-        
-    def log_message(self, message):
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.status_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.ststus_text.see(tk.END)
-        self.root.update_idletasks()
+        self.canvas.get_tk_widget().grid(row=1, column=0, 
+                                        sticky=(tk.N, tk.W, tk.E, tk.S)) 
             
-    def connect_ib(self):
-        try: 
-            host = self.host_var.get()
-            port = self.port_var.get()
-            
-            self.log_message(f"Conneting to IB at {host}:{port}")
-            
-            def connect_thread():
-                try:
-                    self.ib_app.connect(host, port, 0)
-                    self.ib_app.run()
-                
-                except Exception as e:
-                    self.log_message(f"connection error {e}")
-            
-            thread = threading.Thread(target=connect_thread, daemon=True)
-            thread.start()
-            
-            for _ in range(50):
-                if self.ib_app.connected:
-                    break
-                
-                time.sleep(0.1)
-            
-            if self.ib_app.connected:
-                self.connected = True
-                self.connect_btn.config(state="disabled")
-                self.disconnect_btn.config(state="normal")
-                self.query_btn.config(state="normal")
-                self.log_message("sucsessfully connected to IBTWS")
-                
-            else:
-                self.log_message("failed to connect to IBTWS")
-            
-        except Exception as e:
-            self.log_message(f"connection error: {e}")
-            
-    def disconect_ib(self):
-        try:
-            self.ib_app.disconnect()
-            self.connect = False
-            self.connect_btn.config(state="normal")
-            self.disconnect_btn.config(state="disabled")
-            
-            self.querry_btn.config(state="disabled")
-            self.analyze_btn.config(state="disabled")
-            
-            self.current_implied_vol = None
-            self.update_current_vol_display()
-            
-            self.log_message("Disconnected from IBTWS") 
-            
-        except Exception as e:
-            self.log_message(f"Disconnect Error: {e}") 
-            
-            
-    def query_data(self):
-        if not self.connected:
-            messagebox.showerror("Error", "Not Connected to IBTWS")
-            
-        symbol = self.symbol_var.get().upper()
-        duration = self.duration_var.get()
-        
-        self.log_message(f"querying implied volatility for {symbol}")
-        
-        self.ib_app.historical_data.clear()
-        
-        contract = self.create_equity_contract(symbol)
-        
-        self.ib_app.reqHistoricalData(
-            reqId = 1,
-            contract = contract,
-            endDateTime="",
-            duration=duration,
-            barSizeSetting="1 day",
-            whatToShow = "OPTION_IMPLIED_VOLATILITY",
-            useRTH=1,
-            formDate=1,
-            keepUpToDate=False,
-            chartOption=[]
-        )
-        
-        timeout = 15
-        start_time = time.time()
-        
-        while 1 not in self.ib_app.historical_data and (time.time() - start_time) < timeout:
-            time.sleep(0.1)
-            
-        if 1 in self.ib_app.historical_data:
-            data = self.ib_app.historical_data[1]
-            if len(data) > 0:
-                self.equity_data = pd.DataFrame(data)
-                self.equity_data["date"] = pd.to_dataframe(self.equity_data["date"])   
-                self.equity_data.set_index("date", inplace = True)
-                
-                self.equity_data["implied_vol"] = self.equity_data["close"]
-                
-                self.log_message(f"Recieved {len(self.equity_data)}, implied volatility points for {symbol}")
-                self.log_message(f"Date Range:  {self.equity_data.index.min()} : {self.equity_data.index.max()}")
-                self.log_message("NOTE: ALL VALUES ARE ANNUALIZED")
-                
-                self.process_implied_volatility()
-                self.analyze_btn.config(state="normal")
-                
-            else:
-                self.log_message("No vol data recieved")
-                self.equity_data = None
-                
-        else:
-            self.log_message("NOTE: No vol data recieved - MAY NOT BE AVAILABLE FOR SYMBOL")
-            self.equity_data = None
     
     
     def process_implied_volatility(self):
@@ -256,18 +156,23 @@ class ImpliedVolatilityDashboard:
         
         self.log_message("Processing iVol Data")
         
-        self.equity_data["implied_vol"] = self.equity_data["close"] * np.sqrt(self.vol_annualization)
+        self.equity_data["implied_vol"] = self.equity_data["close"] \
+        * np.sqrt(self.vol_annualization)
         
-        self.equity_data["iv_percentile"] = self.equity_data["implied_vol"].rolling(window=252).rank(pct=True)
-        self.current_implied_vol = self.equity_data["implied_vol"].iloc[-1] if len(self.equity_data) > 0 else None
+        self.equity_data["iv_percentile"] = self.equity_data["implied_vol"] \
+            .rolling(window=252).rank(pct=True)
+        self.current_implied_vol = self.equity_data["implied_vol"] \
+        .iloc[-1] if len(self.equity_data) > 0 else None
         
         self.volatility_data = self.equity_data[["implied_vol", "iv_percentile"]].copy()
         
         self.update_current_vol_display(self)
         
         if self.current_implied_vol is not None:
-            self.log_message(f"Current IVol: {self.current_implied_vol:.4f} ({self.current_implied_vol*100:.2f}%)")
-            self.log_message(f"IV_range: {self.equity_data["implied_vol"].min():.4f} - {self.equity_data["implied_vol"].max():.4f}")
+            self.log_message(f"Current IVol: {self.current_implied_vol:.4f} \
+                ({self.current_implied_vol*100:.2f}%)")
+            self.log_message(f"IV_range: {self.equity_data["implied_vol"].min():.4f} \
+                             - {self.equity_data["implied_vol"].max():.4f}")
         else:
             self.log_message("failed to process IVol data")
             
@@ -282,7 +187,9 @@ class ImpliedVolatilityDashboard:
                 vol_min = self.equity_data["implied_vol"].min()
                 vol_max = self.equity_data["implied_vol"].max()
                 vol_mean = self.equity_data["implied_vol"].mean()
-                range_text = f"MIN: {vol_min:.3f}| MAX: {vol_max:.3f}| MEAN: {vol_mean:.3f}"
+                range_text = f"MIN: {vol_min:.3f}| \
+                    MAX: {vol_max:.3f}| \
+                    MEAN: {vol_mean:.3f}"
             else:
                 range_text = "N/A"
                 
@@ -351,12 +258,14 @@ class ImpliedVolatilityDashboard:
          
     def analyze_volatility(self):
         if self.equity_data is None or self.volatility_data is None:
-            messagebox.showerror("Error", "No iVol data is available for analysis")
+            messagebox.showerror("Error", 
+                                 "No iVol data is available for analysis")
             return
         
         self.log_message("Analyze iVol data")
         
-        vol_forward_30d = self.volatility_data["implied_vol"].rolling(window=30, min_periods=1).mean().shift(-30)
+        vol_forward_30d = self.volatility_data["implied_vol"] \
+        .rolling(window=30, min_periods=1).mean().shift(-30)
         
         analysis_df = pd.DataFrame({
             "current_vol": self.volatility_data["implied_vol"],
@@ -369,38 +278,40 @@ class ImpliedVolatilityDashboard:
         if len(analysis_df) <= 30:
             self.log_message("Insufficient iVol data for Analysis")
             
-        slope1, intercept1, r_value1, p_value1, std_error1 = stats.linregress(
+        self.slope1, self.intercept1, self.r_value1, self.p_value1, self.std_error1 = stats.linregress(
             analysis_df["current_vol"], analysis_df["forward_vol"]
         ) 
         
-        slope2, intercept2, r_value2, p_value2, std_error2 = stats.linregress(
+        self.slope2, self.intercept2, self.r_value2, self.p_value2, self.std_error2 = stats.linregress(
             analysis_df["current_vol"], analysis_df["vol_ciff"]
         ) 
         
-        if slope1 != 1:
-            intersection_x = intercept1 / (1-slope1)
+        if self.slope1 != 1:
+            intersection_x = self.intercept1 / (1-self.slope1)
         else:
             intersection_x = analysis_df["current_vol"].median()
             
-        high_vol_regieme = analysis_df["current_vol"] > intersection_x
-        low_vol_regieme = analysis_df["current_vol"] <= intersection_x
+        self.high_vol_regieme = analysis_df["current_vol"] > intersection_x
+        self.low_vol_regieme = analysis_df["current_vol"] <= intersection_x
         
-        if high_vol_regieme.sum() > 10:
-            slope_high, intercept_high, r_value_high, p_value_high, std_error_high = stats.linregress(
-                analysis_df.loc[high_vol_regieme, "current_vol"], analysis_df.loc[high_vol_regieme, "vol_diff"]
+        if self.high_vol_regieme.sum() > 10:
+            self.slope_high, self.intercept_high, self.r_value_high, self.p_value_high, self.std_error_high = stats.linregress(
+                analysis_df.loc[self.high_vol_regieme, "current_vol"], analysis_df.loc[self.high_vol_regieme, "vol_diff"]
             )   
         else:
-            slope_high = intercept_high = r_value_high = p_value_high = std_error_high = None
+            self.slope_high = self.intercept_high = self.r_value_high = self.p_value_high = self.td_error_high = None
             
         
-        if low_vol_regieme.sum() > 10:
-            slope_low, intercept_low, r_value_low, p_value_low, std_error_low = stats.linregress(
-                analysis_df.loc[low_vol_regieme, "current_vol"], analysis_df.loc[low_vol_regieme, "vol_diff"]
+        if self.low_vol_regieme.sum() > 10:
+            self.slope_low, self.intercept_low, self.r_value_low, self.p_value_low, self.std_error_low = stats.linregress(
+                analysis_df.loc[self.low_vol_regieme, "current_vol"], analysis_df.loc[self.low_vol_regieme, "vol_diff"]
             ) 
         else:
-            slope_low = intercept_low = r_value_low = p_value_low = std_error_low = None
+            self.slope_low, self.intercept_low, self.r_value_low, self.p_value_low, self.std_error_low = (None,)*5
             
-        
+        self.plot_analysis(analysis_df)
+            
+    def plot_analysis(self,analysis_df): 
         self.ax1.clear()
         self.ax2.clear()
         self.ax3.clear()
@@ -408,11 +319,88 @@ class ImpliedVolatilityDashboard:
         self.ax1.scatter(analysis_df['current_vol'], analysis_df['forward_vol'], alpha=.6, s=20)
         
         x_range = np.linspace(analysis_df['current_vol'].min(), analysis_df['current_vol'].max(), 100)
-        y_pred1 = slope1 * x_range + intercept1
+        y_pred1 = self.slope1 * x_range + self.intercept1
         
-        self.ax1.plot(x_range, y_pred1, "r-", linewidth=2, label=f"Regression R**2 = {r_value1**2:.3f}")
+        self.ax1.plot(x_range, y_pred1, "r-", linewidth=2, label=f"Regression R**2 = {self.r_value1**2:.3f}")
         
         min_val = min(analysis_df['current_vol'].min(), analysis_df['forward_vol'].min())
+        max_val = max(analysis_df['current_vol'].max(), analysis_df['forward_vol'].max())
+        
+        self.ax1.plot([min_val, max_val], "k--", "y=x")
+        
+        self.ax1.set_xlabel("current implied vol")
+        self.ax1.set_ylabel("30-days forward average iVol")
+        self.ax1.title(f'forward iVol vs current iVOl \n \
+            y = {self.slope1:.3f}x + {self.intercept1}, R^2 = {self.r_value1**2:.3f} ')
+        self.ax1.legend()
+        self.ax1.grid(True, alpha=.3)
+        
+        self.ax2.scatter(analysis_df.loc[self.high_vol_regieme, "current_vol"], analysis_df.loc[self.high_vol_regieme, "vol_diff"],
+                         alpha=.6, color="red", s=20, label="High vol regieme")
+        self.ax2.scatter(analysis_df.loc[self.low_vol_regieme, "current_vol"], analysis_df.loc[self.low_vol_regieme, "vol_diff"], 
+                         alpha=.6, color="green", s=20, label="Low vol regieme")
+        
+        if self.slope_high is not None:
+            x_high = analysis_df.loc[self.high_vol_regieme, "current_vol"]
+            if len(x_high) > 0:
+                x_range_high = np.linspace(x_high.min(), x_high.max, 100)
+                y_pred_high = self.slope_high * x_range_high + self.intercept_high
+                
+                self.ax2.plot(x_range_high, y_pred_high, "r-", linewidth=2,
+                              label=f"High col R^2 = {self.r_value_high**2:.3f}")
+                
+        if self.slope_low is not None:
+            x_low = analysis_df.loc[self.low_vol_regieme, "current_vol"]
+            if len(x_low) > 0:
+                x_range_low = np.linspace(x_low.min(), x_low.max, 100)
+                y_pred_low = self.slope_low * x_range_low + self.intercept_low
+                
+                self.ax2.plot(x_range_low, y_pred_low, "r-", linewidth=2,
+                              label=f"High col R^2 = {self.r_value_low**2:.3f}")
+                
+        self.ax2.axhline(y=0, color="k", linestile="--", linewidt = 1, alpha=.7, label="No Change y=0")  
+        self.ax2.axvline(x=self.intersection_x, color="g", linestile=":", linewidth=1, alpha=.7, 
+                         label=f"regieme split (VOL={self.intersection_x:.3f})")
+        
+        self.ax2.set_xlabel("current implied volatility")
+        self.ax2.set_ylabel("Vol difference (Forward - Current)")
+        self.ax2.title("Vol Diff vs Curr Vol")        
+        self.ax2.legend()
+        self.ax2.grid(True, alpha =.3)
+
+        self.ax3.plot(self.volatility_data.index, self.volatility_data["implied_vol"],
+                      label="implied volatility", linewidth = 1)
+        
+        vol_75th = self.volatility_data["implied_vol"].quantile(0.75)
+        vol_25th = self.volatility_data["implied_vol"].quantile(0.25)
+        
+        self.ax3.axhline(y=vol_75th, color="red",
+                         linestile="--",alpha=.7,
+                         label="75th Percentile")
+        
+        self.ax3.axhline(y=vol_25th, color="green",
+                         linestile="--", alpha=.7,
+                         label="25th Percentile")
+        
+        self.ax3.axhline(y=self.volatility_data["implied_vol"].mean(),
+                         color="gray",linestile="--", alpha=.7,label="mean")
+        
+        if self.current_implied_vol is not None:
+            self.ax3.scatter(self.current_implied_vol[-1],
+                             self.current_implied_vol,
+                             color="red", s=100, zorder=5, label="Current iVOl")
+        self.ax3.set_xlabel("Date")
+        self.ax3.set_ylabel("Implied VOlatility")   
+        self.ax3.set_title("Time Series with regime bands")
+        
+        self.ax3.legend()
+        self.ax3.grid(True, alpha=.3)
+        self.ax3.tick_params(axis="x", rotation=45)
+        
+        self.fig.tight_layout()
+        
+        self.canvas.draw()
+        
         
         
         
