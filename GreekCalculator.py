@@ -62,5 +62,18 @@ if __name__ == '__main__':
     
     price, d1, d2 = c.get_black_scholes()
 
+    delta = c.get_delta()
+    gamma = c.get_gamma()
+    theta = c.get_theta()
+    vega = c.get_vega()
+    rho = c.get_rho()
+    
+    print(f"Call option Price: ${price:.2f}")
+    #print(f"d1; d2: {d1};{d2}")
+    print(f"Sensetivity to price changes Delta: {delta:.3f}")
+    print(f"Sensetivity of Delta to price changes Gamma: {gamma:.3f}")
+    print(f"Price decay over time Theta: {theta:.3f}")
+    print(f"Sensetivity to volatiliy Vega: {vega:.3f}")
+    print(f"ensetivity to interest rate Rho: {rho:.3f}")
     
         
