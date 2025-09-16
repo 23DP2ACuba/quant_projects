@@ -49,3 +49,18 @@ class GreekCalculator:
         '''Rho: Sensitivity to interest rate'''
         self.rho = self.K * self.T * si.norm.cdf(self.d2*self.coef) * np.exp(-self.r*self.T) * self.coef
         return self.rho
+    
+    
+if __name__ == '__main__':
+    S = 100
+    K = 100
+    T = 1
+    r = 0.05
+    sigma = 0.2
+    
+    c = GreekCalculator(S=S, K=K, T=T, r=r, sigma=sigma, put=True)
+    
+    price, d1, d2 = c.get_black_scholes()
+
+    
+        
