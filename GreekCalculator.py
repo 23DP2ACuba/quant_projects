@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.stats as si
+#from ipywidgets import interact
 
 class GreekCalculator:
     def __init__(self, S, K, T, r, sigma, put = False):
@@ -50,6 +51,16 @@ class GreekCalculator:
         self.rho = self.K * self.T * si.norm.cdf(self.d2*self.coef) * np.exp(-self.r*self.T) * self.coef
         return self.rho
     
+    def get_option_greeks(self):
+        price, d1, d2 = self.get_black_scholes()
+
+        print(f"Call option Price: ${price:.2f}")
+        #print(f"d1; d2: {d1};{d2}")
+        print(f"Sensetivity to price changes Delta: {self.get_delta():.3f}")
+        print(f"Sensetivity of Delta to price changes Gamma: {self.get_gamma():.3f}")
+        print(f"Price decay over time Theta: {self.get_theta():.3f}")
+        print(f"Sensetivity to volatiliy Vega: {self.get_vega():.3f}")
+        print(f"ensetivity to interest rate Rho: {self.get_rho():.3f}")
     
 if __name__ == '__main__':
     S = 100
@@ -59,21 +70,10 @@ if __name__ == '__main__':
     sigma = 0.2
     
     c = GreekCalculator(S=S, K=K, T=T, r=r, sigma=sigma, put=True)
+    c.get_option_greeks()
     
-    price, d1, d2 = c.get_black_scholes()
-
-    delta = c.get_delta()
-    gamma = c.get_gamma()
-    theta = c.get_theta()
-    vega = c.get_vega()
-    rho = c.get_rho()
     
-    print(f"Call option Price: ${price:.2f}")
-    #print(f"d1; d2: {d1};{d2}")
-    print(f"Sensetivity to price changes Delta: {delta:.3f}")
-    print(f"Sensetivity of Delta to price changes Gamma: {gamma:.3f}")
-    print(f"Price decay over time Theta: {theta:.3f}")
-    print(f"Sensetivity to volatiliy Vega: {vega:.3f}")
-    print(f"ensetivity to interest rate Rho: {rho:.3f}")
+    
+    
     
         
