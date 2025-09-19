@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from scipy.stats import norm
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import GridSearchCV, train_test_split, TimeSeriesSplit
@@ -17,12 +18,19 @@ pd.options.mode.chained_assignment = None
 # ==========================
 # Config
 # ==========================
-n = 5
-ma_len = 3
-cutoff = 0.06
-n_sim = 200
-p, q = 2, 0
-
+def int_config():
+    global n, ma_len, cutoff, n_sim, p, q, alpha, symbol, start, end
+    n = 5
+    ma_len = 3
+    cutoff = 0.02
+    n_sim = 200
+    p, q = 2, 0
+    alpha = 0.9
+    symbol = "TSLA"
+    start = "2020-01-01"
+    end = "2025-09-17"
+    
+    
 # ==========================
 # Model
 # ==========================
@@ -128,14 +136,16 @@ class LRPricingModel:
     def debug_test(self):
         idx = self.x_test.index
         for i in range(len(self.y_pred)):
-            print(f"{idx[i]}: {self.y_pred[i]:.2f}, {self.y_test.iloc[i]:.2f}")
+            print(f"{idx[i]}: predicted: {self.y_pred[i]:.2f}, actual: {self.y_test.iloc[i]:.2f}")
 
 
-def model_training(df, n, cutoff, ma_len, test_size=0.2):
+def model_training(df, n, cutoff, ma_len, test_size=0.2, debug=False):
     pricing_model = LRPricingModel(n, cutoff, ma_len)
     pricing_model.create_features(df)
     pricing_model.create_target(test_size)
     pricing_model.train()
+    if debug:
+      pricing_model.debug_test()
 
     return pricing_model
 
@@ -143,33 +153,58 @@ def model_training(df, n, cutoff, ma_len, test_size=0.2):
 # ==========================
 # Brownian Bridge
 # ==========================
-def brownian_bridge(df, S0, Sn, pred_dev, n_days=30, n_sim=1000, dt=1/252):
+class BrownianBridge:
+  def __init__(self, df, S0, Sn, pred_dev, n_days=30, n_sim=1000, dt=1/252, sigma=0.2, alpha=None):
+    self.pred_dev = pred_dev / 2
+    self.df = df
+    self.S0 = S0
+    self.Sn = Sn
+    self.n_days = n_days
+    self.n_sim = n_sim
+    self.dt = dt
+    self.sigma = sigma
+    self.alpha = alpha
 
-    def generate_bridge(Sn):
-        paths = np.zeros((n_days + 1, n_sim))
-        paths[0] = S0
+
+
+  def generate_bridge(self, Sn):
+    paths = np.zeros((self.n_days + 1, self.n_sim))
+    paths[0] = self.S0
+    paths[-1] = self.Sn
+
+    if self.alpha is None:
+        # === Hard Brownian Bridge ===
+        paths[-1] = Sn
+        for t in range(1, self.n_days):
+            tau = t / self.n_days
+            Z = np.random.normal(0, 1, self.n_sim)
+            bridge_var = self.sigma**2 * self.dt * (1 - tau)
+            paths[t] = self.S0 + tau * (Sn - self.S0) + Z * np.sqrt(bridge_var) * self.S0
         paths[-1] = Sn
 
-        for t in range(1, n_days):
-            tau = t / n_days
-            bridge_var = pred_dev**2 * dt * (1 - tau)
-            Z = np.random.normal(0, 1, n_sim)
-            paths[t] = S0 + tau * (Sn - S0) + Z * np.sqrt(bridge_var)
+    else:
+        # === Soft Bridge ===
+        for t in range(1, self.n_days + 1):
+            Z = np.random.normal(0, 1, self.n_sim)
+            pull = self.alpha * (Sn - paths[t-1]) / (self.n_days - t + 1)
+            noise = self.sigma * paths[t-1] * np.sqrt(self.dt) * Z
+            paths[t] = paths[t-1] + pull + noise
 
-        return paths
+    return paths
 
-    plt.plot(df["Close"], label="Historical Close")
+  def __call__(self):
+    plt.plot(self.df["Close"], label="Historical Close")
 
-    print(f"S_n + deviation: {Sn + pred_dev}")
-    print(f"S_n - deviation: {Sn - pred_dev}")
+    print(f"S_n + deviation: {self.Sn + self.pred_dev}")
+    print(f"S_n - deviation: {self.Sn - self.pred_dev}")
 
-    paths1 = generate_bridge(Sn + pred_dev)
-    paths2 = generate_bridge(Sn - pred_dev)
+    paths1 = self.generate_bridge(self.Sn + self.pred_dev)
+    paths2 = self.generate_bridge(self.Sn - self.pred_dev)
 
     plt.figure(figsize=(10, 6))
-    for i in range(n_sim):
-        plt.plot(paths1[:, i], lw=1.0, alpha=0.6, color="blue")
-    for i in range(n_sim):
+    for i in range(self.n_sim):
+        plt.plot(paths1[:, i], lw=1.0, alpha=0.6, color="green")
+    for i in range(self.n_sim):
         plt.plot(paths2[:, i], lw=1.0, alpha=0.6, color="red")
 
     plt.title("Brownian Bridge Stock Price Paths")
@@ -192,30 +227,51 @@ class GARCH:
         self.n = n
         self.ma_len = ma_len
 
-    def get_deviation(self):
+    def get_deviation(self, debug):
         sma = self.close.rolling(self.ma_len).mean()
         deviation = (self.close - sma).dropna()
 
         model = arch_model(deviation, p=self.p, q=self.q, vol="Garch", dist="normal")
-        model_fit = model.fit(disp="off")
+        model_fit = model.fit()
+        if debug:
+          print(model_fit)
 
         pred = model_fit.forecast(horizon=1)
         dev_std = np.sqrt(pred.variance.values[-1, :][0])
 
         return dev_std
 
+def tail_probs_normal(mu_pred, sigma_pred, v):
+    z_low = (mu_pred - v - mu_pred) / sigma_pred  
+    z_high = (mu_pred + v - mu_pred) / sigma_pred 
+
+    prob_below = norm.cdf(z_low)     
+    prob_above = norm.cdf(z_high)  
+
+    return prob_below, prob_above
+
 
 # ==========================
 # Run
 # ==========================
-data = yf.Ticker("TSLA").history(start="2020-01-01", end="2025-09-17")
-data = data[["Open", "High", "Low", "Close", "Volume"]]
+if __name__ == "__main__":
+    int_config()
+    
+    data = yf.Ticker(symbol).history(start=start, end=end)
+    data = data[["Open", "High", "Low", "Close", "Volume"]]
+    
+    model = model_training(data.copy(), n, cutoff, ma_len, debug=False)
+    
+    x = data.tail(n + ma_len)
+    mu, x = model.predict(x, n)
+    sigma = data["Close"].pct_change(n).std()
+    print(f"Volatility: {sigma}")
+    
+    garch = GARCH(data, p, q, n, ma_len)
+    pred_dev = garch.get_deviation(debug=False)
+    
+    below, above = tail_probs_normal(mu, pred_dev, sigma)
+    print(f"P <= mu-v: {below:.4f}, P >= mu+v: {above:.4f}")
 
-model = model_training(data.copy(), n, cutoff, ma_len)
-x = data.tail(n + ma_len)
-Sn, x = model.predict(x, n)
-
-garch = GARCH(data, p, q, n, ma_len=ma_len)
-pred_dev = garch.get_deviation()
-
-brownian_bridge(df=data, S0=x, Sn=Sn, n_days=n, n_sim=n_sim, pred_dev=pred_dev)
+    bb = BrownianBridge(df=data, S0=x, Sn=mu, n_days=n, n_sim=n_sim, pred_dev=pred_dev,sigma=sigma, alpha=alpha)
+    bb()
