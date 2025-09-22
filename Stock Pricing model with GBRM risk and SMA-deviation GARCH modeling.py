@@ -5,7 +5,7 @@ import pandas as pd
 import yfinance as yf
 from scipy.stats import norm
 import matplotlib.pyplot as plt
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import BayesianRidge
 from sklearn.model_selection import GridSearchCV, train_test_split, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -29,8 +29,8 @@ def int_config():
     symbol = "TSLA"
     start = "2020-01-01"
     end = "2025-09-17"
-    
-    
+
+
 # ==========================
 # Model
 # ==========================
@@ -86,7 +86,7 @@ class LRPricingModel:
         self.x_test = self.x_test.assign(market_state=self.cluster_pipeline.predict(self.x_test))
 
     def create_target(self, test_size):
-        self.df.loc[:, "Target"] = self.df["MA"].shift(-self.n)
+        self.df.loc[:, "Target"] = self.df["DenoisedClose"].shift(-self.n)
         self.df.dropna(inplace=True)
 
         x = self.df.drop(columns=["Target"])
@@ -99,21 +99,26 @@ class LRPricingModel:
     def train(self):
         pipeline = Pipeline([
             ('scaler', StandardScaler()),
-            ('lr', LinearRegression())
+            ('bayesridge', BayesianRidge())
         ])
 
         param_grid = {
-            'lr__fit_intercept': [True, False]
+            "bayesridge__max_iter": [300, 500, 1000],
+            "bayesridge__tol": [1e-3, 1e-4],
+            "bayesridge__alpha_1": [1e-6, 1e-5, 1e-4],
+            "bayesridge__alpha_2": [1e-6, 1e-5, 1e-4],
+            "bayesridge__lambda_1": [1e-6, 1e-5, 1e-4],
+            "bayesridge__lambda_2": [1e-6, 1e-5, 1e-4],
+            "bayesridge__fit_intercept": [True, False],
+            "bayesridge__compute_score": [True, False],
         }
 
-        tscv = TimeSeriesSplit(n_splits=5)
         grid_search = GridSearchCV(
             estimator=pipeline,
             param_grid=param_grid,
-            scoring='r2',
-            cv=tscv,
-            n_jobs=-1,
-            verbose=1
+            cv=5,
+            scoring="neg_mean_squared_error",
+            n_jobs=-1
         )
 
         grid_search.fit(self.x_train, self.y_train)
@@ -242,11 +247,11 @@ class GARCH:
         return dev_std
 
 def tail_probs_normal(mu_pred, sigma_pred, v):
-    z_low = (mu_pred - v - mu_pred) / sigma_pred  
-    z_high = (mu_pred + v - mu_pred) / sigma_pred 
+    z_low = (mu_pred - v - mu_pred) / sigma_pred
+    z_high = (mu_pred + v - mu_pred) / sigma_pred
 
-    prob_below = norm.cdf(z_low)     
-    prob_above = norm.cdf(z_high)  
+    prob_below = norm.cdf(z_low)
+    prob_above = norm.cdf(z_high)
 
     return prob_below, prob_above
 
@@ -256,20 +261,20 @@ def tail_probs_normal(mu_pred, sigma_pred, v):
 # ==========================
 if __name__ == "__main__":
     int_config()
-    
+
     data = yf.Ticker(symbol).history(start=start, end=end)
     data = data[["Open", "High", "Low", "Close", "Volume"]]
-    
+
     model = model_training(data.copy(), n, cutoff, ma_len, debug=False)
-    
+
     x = data.tail(n + ma_len)
     mu, x = model.predict(x, n)
-    sigma = data["Close"].pct_change(n).std()
+    sigma = np.log(data["Close"]/data["Close"].shift(n)).std()
     print(f"Volatility: {sigma}")
-    
+
     garch = GARCH(data, p, q, n, ma_len)
     pred_dev = garch.get_deviation(debug=False)
-    
+
     below, above = tail_probs_normal(mu, pred_dev, sigma)
     print(f"P <= mu-v: {below:.4f}, P >= mu+v: {above:.4f}")
 
