@@ -25,20 +25,19 @@ class CrossSectionalMR(bt.Strategy):
         self.pbar = tqdm(total=self.total_bars, desc="Backtesting Progress")
 
     def next(self):
+
         stock_returns = np.zeros(len(self.data))
+
         for index, stock in enumerate(self.data):
             stock_returns[index] = (stock.close[0] - stock.close[-1]) / stock.close[-1]
 
         market_return = np.mean(stock_returns)
-        wi = -(stock_returns - market_return)
-        wi = wi / np.sum(np.abs(wi))
+
+        weights = -(stock_returns-market_return)
+        weights = weights / np.sum(np.abs(weights))
 
         for index, stock in enumerate(self.data):
-            self.order_target_percent(stock, wi[index])
-
-        self.bar_counter += 1
-        if self.pbar:
-            self.pbar.update(1)
+            self.order_target_percent(stock, target=weights[index])
 
     def stop(self):
         if self.pbar:
