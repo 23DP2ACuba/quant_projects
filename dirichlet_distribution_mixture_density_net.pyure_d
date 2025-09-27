@@ -1,0 +1,216 @@
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import statsmodels.api as sm
+from itertools import combinations
+from scipy.optimize import minimize
+import matplotlib.pyplot as plt
+
+import tensorflow as tf
+from tensorflow.keras import layers
+import tensorflow_probability as tfp
+
+# ---------------- CONFIG ----------------
+n = 7                       
+rebalance_step = 1
+WINDOW = 30                 
+n_return = 5
+assets = ["TSLA", "PLTR", "NVDA", "MSFT", "AAPL"]
+START = "2021-01-01"
+END = "2026-01-01"
+# ----------------------------------------
+
+# === Download prices ===
+data = yf.download(assets, start=START, end=END, progress=False)
+prices = data["Close"].dropna()
+
+# === Sharpe optimizer ===
+class SharpeOptim:
+    def __init__(self, rfr: float = 0.009):
+        self.rfr = rfr
+
+    def neg_sharpe(self, weights):
+        pf_ret = np.dot(weights, self.mean_returns)
+        pf_vol = np.sqrt(np.dot(weights.T, np.dot(self.cov_mtx, weights)))
+        if pf_vol == 0:
+            return 1e6
+        return -(pf_ret - self.rfr) / pf_vol
+
+    def max_sharpe(self, window_returns: pd.DataFrame, min_w_threshold=0.05):
+        n_assets = window_returns.shape[1]
+        self.mean_returns = window_returns.mean(axis=0).values
+        self.cov_mtx = window_returns.cov().values + np.eye(n_assets) * 1e-8
+
+        cons = ({"type": "eq", "fun": lambda w: np.sum(w) - 1})
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        init_guess = np.array(n_assets * [1.0 / n_assets])
+
+        result = minimize(self.neg_sharpe, init_guess, method="SLSQP",
+                          bounds=bounds, constraints=cons)
+
+        if not result.success:
+            w = init_guess
+        else:
+            w = result.x
+
+        w = np.where(w < min_w_threshold, 0.0, w)
+        s = w.sum()
+        if s == 0:
+            w = np.array(n_assets * [1.0 / n_assets])
+        else:
+            w = w / s
+        return w
+
+# === Create rolling optimized weights (targets) ===
+opt = SharpeOptim(rfr=0.009)
+weights_history = {}
+
+lookback = n
+for end_idx in range(lookback, len(prices), rebalance_step):
+    start_idx = end_idx - lookback
+    window = prices.iloc[start_idx:end_idx].pct_change().dropna()
+    if window.shape[0] < 2:
+        continue
+    w = opt.max_sharpe(window)
+    timestamp = prices.index[end_idx - 1] 
+    weights_history[timestamp] = w
+
+weights_df = pd.DataFrame.from_dict(weights_history, orient='index', columns=assets)
+weights_df = weights_df.sort_index()
+
+targets = weights_df.shift(-1).dropna()
+weights_df = weights_df.loc[targets.index] 
+
+# === FeatureBuilder ===
+class FeatureBuilder:
+    def __init__(self, prices, window=WINDOW, n_return=n_return):
+        self.prices = prices.copy()
+        self.window = window
+        self.n_return = n_return
+        self.assets = list(prices.columns)
+
+    def create_pair_features(self):
+        all_pairs = list(combinations(self.assets, 2))
+        features = []
+
+        for a, b in all_pairs:
+            alpha = [np.nan] * self.window
+            beta = [np.nan] * self.window
+
+            for i in range(self.window, len(self.prices)):
+                past = self.prices.iloc[i-self.window:i]
+                x = past[a].values
+                y = past[b].values
+                x_const = sm.add_constant(x)
+                try:
+                    model = sm.OLS(y, x_const).fit()
+                    alpha.append(model.params[0])
+                    beta.append(model.params[1])
+                except Exception:
+                    alpha.append(np.nan)
+                    beta.append(np.nan)
+
+            idx = self.prices.index
+            rolling_params = pd.DataFrame({"alpha": alpha, "beta": beta}, index=idx)
+            spread = self.prices[b] - (rolling_params["alpha"] + rolling_params["beta"] * self.prices[a])
+            rolling_mean = spread.rolling(self.window).mean()
+            rolling_std = spread.rolling(self.window).std()
+            z_score = (spread - rolling_mean) / rolling_std
+            n_day_return = self.prices[b].pct_change(self.n_return)
+
+            df_pair = pd.DataFrame({
+                f"{a}_{b}_spread": spread,
+                f"{a}_{b}_rollmean": rolling_mean,
+                f"{a}_{b}_rollstd": rolling_std,
+                f"{a}_{b}_z": z_score,
+                f"{a}_{b}_ret{self.n_return}": n_day_return
+            }, index=idx)
+
+            features.append(df_pair)
+
+        feat = pd.concat(features, axis=1)
+        feat = feat.dropna()
+        self.features = feat
+        return feat
+
+fb = FeatureBuilder(prices, window=WINDOW, n_return=n_return)
+X = fb.create_pair_features()
+
+
+common_idx = X.index.intersection(targets.index)
+X = X.loc[common_idx]
+y = targets.loc[common_idx].values
+
+
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X.values)
+
+
+class DirichletMDN(tf.keras.Model):
+    def __init__(self, output_dim, num_components=1):
+        super().__init__()
+        self.output_dim = output_dim
+        self.num_components = num_components
+        self.hidden1 = layers.Dense(128, activation="relu")
+        self.hidden2 = layers.Dense(128, activation="relu")
+        self.alpha_layer = layers.Dense(self.num_components * self.output_dim, activation="softmax")
+
+    def call(self, inputs, training=False):
+        x = self.hidden1(inputs)
+        x = self.hidden2(x)
+        alpha_raw = self.alpha_layer(x)
+
+        alpha = tf.reshape(alpha_raw, (-1, self.num_components, self.output_dim))
+        # ensure numerical stability
+        alpha = tf.maximum(alpha, 1e-3)
+        return alpha
+
+def dirichlet_mixture_nll(y_true, alpha):
+
+    batch = tf.shape(alpha)[0]
+    k = tf.shape(alpha)[1]
+    cat = tfp.distributions.Categorical(probs=tf.ones((batch, k), dtype=tf.float32) / tf.cast(k, tf.float32))
+    comp = tfp.distributions.Dirichlet(concentration=alpha)
+    mix = tfp.distributions.MixtureSameFamily(mixture_distribution=cat,
+                                              components_distribution=comp)
+    logp = mix.log_prob(y_true)
+    return -tf.reduce_mean(logp)
+
+output_dim = len(assets)
+num_components = 2
+model = DirichletMDN(output_dim=output_dim, num_components=num_components)
+optimizer = tf.keras.optimizers.Adam(learning_rate=5e-4)
+
+def loss_fn(y_true, alpha_pred):
+    return dirichlet_mixture_nll(y_true, alpha_pred)
+
+model.compile(optimizer=optimizer, loss=loss_fn)
+
+eps = 1e-6
+y_simplex = np.maximum(y, eps)
+y_simplex = (y_simplex.T / y_simplex.sum(axis=1)).T
+
+from sklearn.model_selection import train_test_split
+X_tr, X_val, y_tr, y_val = train_test_split(X_scaled, y_simplex, test_size=0.2, random_state=42)
+
+es = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
+
+history = model.fit(X_tr, y_tr, validation_data=(X_val, y_val),
+                    epochs=200, batch_size=64, callbacks=[es], verbose=2)
+
+alpha_pred = model.predict(X_val)
+alpha_sum = np.sum(alpha_pred, axis=2, keepdims=True)  
+expected_per_component = alpha_pred / alpha_sum  
+
+predicted_weights = expected_per_component.mean(axis=1)  
+
+print("Example true weights (first validation row):", y_val[0])
+print("Example predicted weights (first validation row):", predicted_weights[0])
+
+plt.figure(figsize=(8,4))
+plt.scatter(range(len(y_val)), y_val[:,0], alpha=0.3, label="True w[0]")
+plt.scatter(range(len(predicted_weights)), predicted_weights[:,0], alpha=0.6, label="Pred w[0]", marker='x')
+plt.legend()
+plt.title("True vs Predicted weight for asset 0 on validation set")
+plt.show()
