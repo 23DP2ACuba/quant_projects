@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import scipy.stats as si
 import yfinance as yf
@@ -166,17 +167,72 @@ def regression_metrics(y_true, y_pred, dataset_name=""):
     return r2, rmse, mae, direction_acc
 
 # ----------------------------
+# Walk forward plot
+# ----------------------------
+def walk_forward_plot(model, X_train, y_train, X_test, y_test, retrain=False, scaler=None, title="Walk-Forward Prediction"):
+
+    y_pred_walk = []
+    y_true_walk = []
+    X_all = np.vstack([X_train, X_test])
+    y_all = np.concatenate([y_train, y_test])
+
+    test_start_idx = len(X_train)
+    n_test = len(X_test)
+
+    model_ = copy.deepcopy(model)
+
+    for i in range(n_test):
+        x_next = X_test[i].reshape(1, -1)
+        y_pred = model_.predict(x_next)[0]
+        y_pred_walk.append(y_pred)
+        y_true_walk.append(y_test.iloc[i] if hasattr(y_test, "iloc") else y_test[i])
+
+        if retrain:
+            X_new_train = X_all[: test_start_idx + i + 1]
+            y_new_train = y_all[: test_start_idx + i + 1]
+            if scaler:
+                X_new_train = scaler.fit_transform(X_new_train)
+            model_.fit(X_new_train, y_new_train)
+
+    df_res = pd.DataFrame({
+        "True": y_true_walk,
+        "Pred": y_pred_walk
+    })
+
+    correlation = df_res["True"].corr(df_res["Pred"])
+    covariance = df_res["True"].cov(df_res["Pred"])
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(df_res["True"].values, label="True", lw=2)
+    plt.plot(df_res["Pred"].values, label="Predicted", lw=2, linestyle="--")
+    plt.title(f"{title}\nCorr={correlation:.3f} | Cov={covariance:.6f}")
+    plt.xlabel("Step")
+    plt.ylabel("Target value")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    print(f"Correlation (Pred vs True): {correlation:.4f}")
+    print(f"Covariance (Pred vs True): {covariance:.6f}")
+
+    metrics = {"correlation": correlation, "covariance": covariance}
+
+    return np.array(y_pred_walk), metrics
+    
+# ----------------------------
 # Compute returns and features
 # ----------------------------
+window = config.get("window")
 log_returns = np.log(data["Close"] / data["Close"].shift())
 market_returns = np.log(market["Close"] / market["Close"].shift())
 df = pd.DataFrame({"log_returns": log_returns, "market_returns": market_returns}).dropna()
 
-z_score = get_z_score(market_returns=df["market_returns"], w_norm=w_norm)
+z_score = get_z_score(market_returns=df["market_returns"], w_norm=config.get("w_norm"))
 
-sigma_hat = get_sigma_hat(r_s=df["log_returns"], window=w_vol)
+sigma_hat = get_sigma_hat(r_s=df["log_returns"], window=config.get("w_vol"))
 
-beta_hat, gamma, vanna = get_beta_gamma_vanna(df["market_returns"], df["log_returns"], sigma_hat, window=w_beta)
+beta_hat, gamma, vanna = get_beta_gamma_vanna(df["market_returns"], df["log_returns"], sigma_hat, window=config.get("w_beta"))
 
 beta_simple = df["log_returns"].rolling(window).cov(df["market_returns"]) / df["market_returns"].rolling(window).var()
 
@@ -203,3 +259,14 @@ y_test_pred = model.predict(x_test)
 
 train_metrics = regression_metrics(y_train, y_train_pred, dataset_name="Train")
 test_metrics  = regression_metrics(y_test, y_test_pred, dataset_name="Test")
+
+y_walk_preds, metrics = walk_forward_plot(
+    model=model,
+    X_train=x_train,
+    y_train=y_train,
+    X_test=x_test,
+    y_test=y_test,
+    retrain=False,
+    title="Walk-Forward Prediction (XGB)"
+)
+
