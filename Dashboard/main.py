@@ -42,3 +42,62 @@ class IBApp(EWrapper, EClient):
             "close": bar.close,
             "volume": bar.volume
         })
+        
+    def historical_data_end_fn(self, reqId, start, end):
+        print(f"Historical data received for reqId{reqId}")
+        
+        
+class EarningsDashboard:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Earnings Trading Dashboard - IV Curush Analysis")
+        self.root.geometry("1600x1000")
+        
+        self.stock_data = None
+        self.vix_data = None
+        self.earninfs_data = None
+        self.ticker = None
+        self.iv_data = None
+        
+        self.ib_app = IBApp()
+        self.conected_flag = False
+        
+        self.risk_free_rate = 0.05
+        
+        self.ax1_twin = None
+        
+        self.setup_ui()
+        
+    def create_equity_contract(self, symbol):
+        contract = Contract()
+        contract.symbol = symbol.upper()
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.currency = "USD"   
+        
+        return contract
+    
+    def create_vix_contract(self):
+        contract = Contract()
+        contract.symbol = "VIX"
+        contract.secType = "IDX"
+        contract.exchange = "CBOE"
+        contract.currency = "USD"   
+        
+        return contract
+        
+    def setup_ui(self):
+        main_frame = ttk.frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        self.root.columnconfigure(0, weiht=1)
+        self.root.rowconfigure(0, weight=1)
+        
+        main_frame.columnconfigure(0, weiht=1)
+        main_frame.rowconfigure(0, weight=1)
+        
+        conn_frame = ttk.LabelFrame(main_frame, text="Interactive Brokers Connection", padding="5")
+        conn_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        ttk.Label(conn_frame, text="Host: ")
+        
