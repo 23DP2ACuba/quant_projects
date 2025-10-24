@@ -99,5 +99,66 @@ class EarningsDashboard:
         conn_frame = ttk.LabelFrame(main_frame, text="Interactive Brokers Connection", padding="5")
         conn_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
-        ttk.Label(conn_frame, text="Host: ")
+        ttk.Label(conn_frame, text="Host:").grid(row=0, column=0, padx=(0, 5))
+        self.host_var = tk.StringVar(value="127.0.0.1")
+        ttk.Entry(conn_frame, textvariable=self.host_var, width=15).grid(row=0, column=1, padx=(0, 10))
+        
+        ttk.Label(conn_frame, text="Port:").grid(row=0, column=2, padx=(0, 5))
+        self.port_var = tk.StringVar(value="7497")
+        ttk.Entry(conn_frame, textvariable=self.port_var, width=15).grid(row=0, column=3, padx=(0, 10))
+        
+        self.connect_btm = ttk.Button(conn_frame, text='Connect', command=self.connect_ib)
+        self.connect_btm.grid(row=0, column=4, padx=(0, 10))
+        
+        self.disconnect_btm = ttk.Button(conn_frame, text='Disconnect', command=self.disconnect_ib)
+        self.disconnect_btm.grid(row=0, column=5, padx=(0, 10), state="disabled")
+        
+        earnings_frame = ttk.LabelFrame(main_frame, text="Earnings Analysis setup", padding = "5")
+        earnings_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        ttk.Label(earnings_frame, text="Ticker:").grid(row=0, column=0, padx=(0, 5))
+        self.ticker_var = tk.StringVar(value="TSLA")
+        ttk.Entry(earnings_frame, textvariable=self.ticker_var, width=10).grid(row=0, column=1, padx=(0, 10))
+        
+        ttk.Label(earnings_frame, text="Earnings Date:").grid(row=0, column=2, padx=(0, 5))
+        self.date_var = tk.StringVar(value="2025-10-22")
+        ttk.Entry(earnings_frame, textvariable=self.date_var, width=12).grid(row=0, column=3, padx=(0, 10))
+        
+        ttk.Label(earnings_frame, text="Days to Expiration:").grid(row=0, column=4, padx=(0, 5))
+        self.days_to_exp_var = tk.StringVar(value="30")
+        ttk.Entry(earnings_frame, textvariable=self.days_to_exp_var, width=12).grid(row=0, column=5, padx=(0, 10))
+        
+        self.analyze_btn = ttk.Button(earnings_frame, text="Analyze IV Crush", command=self.analyze_iv_crush, state="disabled")
+        self.analyze_btn.grid(row=0, column=6)
+        
+        metrics_frame = ttk.LabelFrame(main_frame, text="Current Metrics", padding="5")
+        metrics_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5))
+        
+        ttk.Label(metrics_frame, text="Stock Price").grid(row=0, column=0, padx=(0, 5))
+        self.stock_price_label = ttk.Label(metrics_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.stock_price_label.grid(row=0, column=1, padx=(0, 20))
+        
+        ttk.Label(metrics_frame, text="VIX Level").grid(row=0, column=2, padx=(0, 5))
+        self.vix_level_label = ttk.Label(metrics_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.vix_level_label.grid(row=0, column=3, padx=(0, 20))
+        
+        ttk.Label(metrics_frame, text="Current IV").grid(row=0, column=4, padx=(0, 5))
+        self.curr_iv_label = ttk.Label(metrics_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.curr_iv_label.grid(row=0, column=5, padx=(0, 20))
+        
+        crush_frame = ttk.LabelFrame(main_frame, text="IV Crush Analysis", padding="5")
+        crush_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E))
+        
+        ttk.Label(crush_frame, text="Pre Event IV").grid(row=0, column=0, padx=(0, 5))
+        self.stock_price_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.stock_price_label.grid(row=0, column=1, padx=(0, 20))
+        
+        ttk.Label(crush_frame, text="IV Crush %").grid(row=0, column=2, padx=(0, 5))
+        self.vix_level_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.vix_level_label.grid(row=0, column=3, padx=(0, 20))
+        
+        ttk.Label(crush_frame, text="Current IV").grid(row=0, column=4, padx=(0, 5))
+        self.curr_iv_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.curr_iv_label.grid(row=0, column=5, padx=(0, 20))
+        
         
