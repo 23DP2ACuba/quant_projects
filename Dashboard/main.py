@@ -147,18 +147,121 @@ class EarningsDashboard:
         self.curr_iv_label.grid(row=0, column=5, padx=(0, 20))
         
         crush_frame = ttk.LabelFrame(main_frame, text="IV Crush Analysis", padding="5")
-        crush_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E))
+        crush_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), paddy=(0, 10))
         
-        ttk.Label(crush_frame, text="Pre Event IV").grid(row=0, column=0, padx=(0, 5))
-        self.stock_price_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
-        self.stock_price_label.grid(row=0, column=1, padx=(0, 20))
+        ttk.Label(crush_frame, text="Pre-Earnings IV").grid(row=0, column=0, padx=(0, 5))
+        self.pre_iv_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.pre_iv_label.grid(row=0, column=1, padx=(0, 20))
         
-        ttk.Label(crush_frame, text="IV Crush %").grid(row=0, column=2, padx=(0, 5))
-        self.vix_level_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
-        self.vix_level_label.grid(row=0, column=3, padx=(0, 20))
+        ttk.Label(crush_frame, text="Pos-Earnings IV").grid(row=0, column=2, padx=(0, 5))
+        self.post_iv_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.post_iv_label.grid(row=0, column=3, padx=(0, 20))
         
-        ttk.Label(crush_frame, text="Current IV").grid(row=0, column=4, padx=(0, 5))
-        self.curr_iv_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
-        self.curr_iv_label.grid(row=0, column=5, padx=(0, 20))
+        ttk.Label(crush_frame, text="IV Crush %").grid(row=0, column=4, padx=(0, 5))
+        self.iv_crush_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"), foreground = "red")
+        self.iv_crush_label.grid(row=0, column=5, padx=(0, 20))
+        
+        spot_strike_frame = ttk.LabelFrame(main_frame, text='Spot vs Strike Analysis', padding="5")
+        spot_strike_frame.grid(row=4,column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        ttk.Label(spot_strike_frame, text="Strike Price").grid(row=0, column=0, padx=(0, 5))
+        self.strike_price_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.strike_price_label.grid(row=0, column=5, padx=(0, 20))
+        
+        ttk.Label(spot_strike_frame, text="Pre-Earnings Close").grid(row=0, column=2, padx=(0, 5))
+        self.pre_spot_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.pre_spot_label.grid(row=0, column=5, padx=(0, 20))
+        
+        ttk.Label(spot_strike_frame, text="Post-Earnings Spot(Next day average)").grid(row=0, column=4, padx=(0, 5))
+        self.post_spot_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.post_spot_label.grid(row=0, column=5, padx=(0, 20))
+        
+        option_frame = ttk.LabelFrame(main_frame, text='ATM Straddle Pricing & P/L ', padding="5")
+        option_frame.grid(row=5,column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        ttk.Label(option_frame, text="Pre-Earnings Call").grid(row=0, column=0, padx=(0, 5))
+        self.pre_call_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.pre_call_label.grid(row=0, column=5, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="Post-Earnings Call").grid(row=0, column=2, padx=(0, 5))
+        self.post_call_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.post_call_label.grid(row=0, column=5, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="Call Change").grid(row=0, column=4, padx=(0, 5))
+        self.call_loss_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.call_loss_label.grid(row=0, column=5, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="Pre-Earnings Put").grid(row=1, column=0, padx=(0, 5))
+        self.pre_put_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.pre_put_label.grid(row=1, column=5, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="Post-Earnings Put").grid(row=1, column=2, padx=(0, 5))
+        self.post_put_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.post_put_label.grid(row=1, column=5, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="Put Change").grid(row=1, column=4, padx=(0, 5))
+        self.put_loss_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.put_loss_label.grid(row=1, column=5, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="Pre-Earnings Straddle").grid(row=2, column=0, padx=(0, 5))
+        self.pre_straddle_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.pre_straddle_label.grid(row=2, column=5, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="Post-Earnings Straddle").grid(row=2, column=2, padx=(0, 5))
+        self.post_straddle_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.post_straddle_label.grid(row=2, column=5, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="Straddle Change").grid(row=2, column=4, padx=(0, 5))
+        self.straddle_loss_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.straddle_loss_label.grid(row=2, column=5, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="LONG Straddle P/L").grid(row=3, column=0, padx=(0, 5))
+        self.long_pl_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.long_pl_label.grid(row=3, column=1, columnspan=2, padx=(0, 20))
+        
+        ttk.Label(option_frame, text="SHORT Straddle P/L").grid(row=3, column=3, padx=(0, 5))
+        self.short_pl_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.short_pl_label.grid(row=3, column=4, columnspan=2, padx=(0, 20))
+        
+        
+        greek_frame = ttk.LabelFrame(main_frame, text="Greek Analysis", padding="5")
+        greek_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), paddy=(0, 10))
+        
+        ttk.Label(greek_frame, text="Pre-Earnings Delta").grid(row=0, column=0, padx=(0, 5))
+        self.pre_delta_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.pre_delta_label.grid(row=0, column=0, padx=(0, 20))
+        
+        ttk.Label(greek_frame, text="Post-Earnings Delta").grid(row=0, column=2, padx=(0, 5))
+        self.post_delta_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.post_delta_label.grid(row=0, column=2, padx=(0, 20))
+        
+        ttk.Label(greek_frame, text="Delta Change").grid(row=0, column=4, padx=(0, 5))
+        self.delta_change_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.delta_change_label.grid(row=0, column=4, padx=(0, 20))
+        
+        ttk.Label(greek_frame, text="Pre-Earnings Vega").grid(row=2, column=0, padx=(0, 5))
+        self.pre_vega_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.pre_vega_label.grid(row=1, column=0, padx=(0, 20))
+        
+        ttk.Label(greek_frame, text="Post-Earnings Vega").grid(row=2, column=2, padx=(0, 5))
+        self.post_vega_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.post_vega_label.grid(row=1, column=2, padx=(0, 20))
+        
+        ttk.Label(greek_frame, text="Vega Change").grid(row=2, column=4, padx=(0, 5))
+        self.vega_change_label = ttk.Label(crush_frame, text="N/A", font=("Arial", 10, "bold"))
+        self.vega_change_label.grid(row=1, column=4, padx=(0, 20))
+        
+        status_frame = ttk.LabelFrame(main_frame, text="Greek Analysis", padding="5")
+        status_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), paddy=(0, 10))
+        
+        self.status_text = scrolledtext.ScrolledText(status_frame, height=6, width=80)
+        self.ststus_text.grid(row=0, column=0, sticky=(tk.W, tk.E))
+        status_frame.columnconfigure(0, weight=1)
+        
+        plot_frame = ttk.LabelFrame(main_frame, text="IV Crush Visualization", padding = "5")
+        plot_frame.grid(row=8, columnspan=2, coumn=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        plot_frame.columnconfigure(0, weight=1)
+        plot_frame.rowconfigure(0, weight=1)
         
         
