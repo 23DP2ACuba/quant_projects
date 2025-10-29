@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import threading
+import time
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -264,4 +265,79 @@ class EarningsDashboard:
         plot_frame.columnconfigure(0, weight=1)
         plot_frame.rowconfigure(0, weight=1)
         
+        self.fig, (self.ax1, self.ax2) = plt.pubplots(1, 2, figsize=(16, 6))
+        self.canvas = FigureCanvasTkAgg(self.fig, plot_frame)
+        
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky=(tk.E, tk.W, tk.N, tk.S))
+        
+    def log_message(self, message):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.status_text.insert(tk.END, f"[{timestamp}] message\n")
+        
+        self.status_text.see(tk.END)
+        self.root.update_iddletasks()
+        
+    def connect_ib(self):
+        try:
+            host = self.host_var.get()        
+            port = int(self.host_var.get())       
+            
+            self.log_message(f"Connecting to IB at {host} : {port}") 
+            
+            def connect_thread():
+                try:
+                    self.ib_app.connect(host, port)
+                    self.ib_app.run()
+
+                except Exception as e:
+                    self.log_message(f"Connection error: {e}")
+                    
+            thread = threading.Thread(target=connect_thread, daemon=True)
+            thread.start()
+            
+            for i in range(100):
+                if self.ib_app.connected:
+                    try:
+                        server_version = self.ib_app.serverVersion()
+                        if server_version is not None and server_version > 0:
+                            break
+                        
+                    except:
+                        pass
+                    time.sleep()
+                    
+            if self.ib_app.connected:
+                try:
+                    server_version = self.ib_app.serverVersion()
+                    if server_version is not None and server_version > 0:
+                        self.connected = True
+                        self.connect_btm.config(state="disabled")
+                        self.disconnect_btm(state="normal")
+                        self.analyze_btn(state="normal")
+                        self.log_message(f"Successfully Connected to IB | Server version: {server_version}")
+                    else:
+                        self.log_message(f"Connected, but server version unavailable")
+                except Exception as e:
+                    self.log_message(f"Connected, but server version check failed: {e}")
+            else:
+                self.log_message("Failed to connect to IB")
+        
+        except Exception as e:
+            self.log_message("Connection Error: {e}")
+            
+    def disconnecr_ib(self):
+        try:
+            self.ib_app.disconnect()
+            self.connect = False
+            self.connect_btm.config(state="normal")
+            self.disconnect_btm.config(state="disabled")
+            self.analyze_btn.config(state="disabled")
+            
+            self.clear_analysis_results()
+            
+            self.log_message("Disconnect from Interactive Brokers")
+            
+        except Exception as e:
+            self.log_message(f"Disconnect Error: {e}")
+            
         
