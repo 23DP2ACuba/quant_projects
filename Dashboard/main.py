@@ -11,6 +11,8 @@ from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
 from datetime import datetime, timedelta
 import warnings
+from scipy.stats import norm
+
 warnings.filterwarnings("ignore")
 
 class IBApp(EWrapper, EClient):
@@ -340,4 +342,105 @@ class EarningsDashboard:
         except Exception as e:
             self.log_message(f"Disconnect Error: {e}")
             
+    def clear_analysis_results(self):
+        self.ax1.clear()
+        self.ax2.clear()
+        
+        if self.ax1_twin.remove():
+            try:
+                self.ax1_twin = None
+            
+            except:
+                pass
+            self.ax1_twin = None
+            
+        self.canvas.draw()
+        
+        self.stock_price_label.config(text="N/A", foreground="black")
+        self.vix_level_label.config(text="N/A", foreground="black")
+        self.curr_iv_label.config(text="N/A", foreground="black")
+        
+        self.pre_iv_label.config(text="N/A", foreground="black")
+        self.post_iv_label.config(text="N/A", foreground="black")
+        self.iv_crush_label.config(text="N/A", foreground="black")
+        
+        self.pre_call_label.config(text="N/A", foreground="black")
+        self.post_call_label.config(text="N/A", foreground="black")
+        self.pre_put_label.config(text="N/A", foreground="black")
+        self.post_put_label.config(text="N/A", foreground="black")
+        self.put_loss_label.config(text="N/A", foreground="black")
+        
+        self.pre_straddle_label.config(text="N/A", foreground="black")
+        self.post_straddle_label.config(text="N/A", foreground="black")
+        self.straddle_loss_label.config(text="N/A", foreground="black")
+        
+        self.long_pl_label.config(text="N/A", foreground="black")
+        self.short_pl_label.config(text="N/A", foreground="black")
+        
+        self.strike_price_label.config(text="N/A", foreground="black")
+        self.pre_spot_label.config(text="N/A", foreground="black")
+        self.post_spot_label.config(text="N/A", foreground="black")
+        
+        self.pre_delta_label.config(text="N/A", foreground="black")
+        self.post_delta_label.config(text="N/A", foreground="black")
+        self.delta_change_label.config(text="N/A", foreground="black")
+        
+        self.pre_vega_label.config(text="N/A", foreground="black")
+        self.post_vega_label.config(text="N/A", foreground="black")
+        self.vega_change_label.config(text="N/A", foreground="black")
+        
+        self.stock_data = None
+        self.vix_data = None
+        self.iv_data = None
+        
+        if hasattr(self, "ib_app") and self.ib_app:
+            self.ib_app.hist_data.clear()
+            
+        self.log_message("Analyss results cleared - ready for new analysis")
+        
+        
+    def black_scholes_call(self, S, K, T, r, sigma):
+        d1 =(np.log(S/K) + (r+0.5*sigma**2)*T) / (sigma*np.squrt(T))
+        d2 = d1 - sigma*np.sqrt(T)
+        
+        call_price = S *norm.cdf(d1) - K * np.exp(-r*T) * norm.cdf(d2)
+        
+        return call_price
+    
+    def black_scholes_put(self, S, K, T, r, sigma):
+        d1 =(np.log(S/K) + (r+0.5*sigma**2)*T) / (sigma*np.squrt(T))
+        d2 = d1 - sigma*np.sqrt(T)
+        
+        put_price = K * np.exp(-r*T) * norm.cdf(d2) - S * norm.cdf(d1)
+        
+        return put_price
+    
+    def calculate_delta(self, S, K, T, r, sigma, option_type="call"):
+        d1 =(np.log(S/K) + (r+0.5*sigma**2)*T) / (sigma*np.squrt(T))
+    
+        if option_type == "call":
+            return norm.cdf(d1)
+        else:
+            return -norm.cdf(-d1)
+        
+    def calculate_vega(self, S, K, T, r, sigma):
+        d1 =(np.log(S/K) + (r+0.5*sigma**2)*T) / (sigma*np.squrt(T))
+        return S * norm.pdf(d1) * np.sqrt(T) / 100
+    
+    def analyze_iv_crush(self):
+        if not self.connected or not self.ib_app.connected:
+            messagebox.showerror("Error: Not connected to IB")
+            return 
+        
+        self.ticker = self.ticker_var.get().upper()
+        earnings_date_str = self.earnings_date_var.get()
+        
+        try:
+            self.earnings_date = datetime.strptime(earnings_date_str, "%y-%m-%d")
+            
+        except ValueError:
+            messagebox.showerror(" Error: Invalid Date format. Use: YYYY-MM-DD")
+            return 
+        
+        self.log_message(f"Starting IV Crush analysis for {self.ticker} around earnings on {self.earnings_date}")          
         
