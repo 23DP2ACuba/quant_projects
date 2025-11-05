@@ -58,7 +58,7 @@ class EarningsDashboard:
         
         self.stock_data = None
         self.vix_data = None
-        self.earninfs_data = None
+        self.earnings_date = None
         self.ticker = None
         self.iv_data = None
         
@@ -429,7 +429,7 @@ class EarningsDashboard:
     
     def analyze_iv_crush(self):
         if not self.connected or not self.ib_app.connected:
-            messagebox.showerror("Error: Not connected to IB")
+            messagebox.showerror("Error", "Not connected to IB")
             return 
         
         self.ticker = self.ticker_var.get().upper()
@@ -439,8 +439,49 @@ class EarningsDashboard:
             self.earnings_date = datetime.strptime(earnings_date_str, "%y-%m-%d")
             
         except ValueError:
-            messagebox.showerror(" Error: Invalid Date format. Use: YYYY-MM-DD")
+            messagebox.showerror(" Error", "Invalid Date format. Use: YYYY-MM-DD")
             return 
         
         self.log_message(f"Starting IV Crush analysis for {self.ticker} around earnings on {self.earnings_date}")          
+        
+        self.clear_analysis_results()
+        
+        start_date  =self.earnings_date - timedelta(days = 10)
+        end_date  =self.earnings_date + timedelta(days = 10)
+        
+        self.ib_app.hist_data.clear()
+        
+        self.log_message(f"Querrying stock data for {self.ticker}")
+        stock_contract = self.create_equity_contract(self.ticker)
+        
+        if 1 in self.ib_app.hist_data:
+            del self.ib_app.hist_data[1]
+            
+        try:
+            self.ib_app.requestHistoricalData(
+                reqId=1,
+                contract=stock_contract,
+                endDateTime=end_date.strftime("%Y%m%d %H:%M:%S"),
+                durationStr = "3 w",
+                barSizeSetting="1 day",
+                whatToShow="TRADES",
+                useRTH=1,
+                format_date=1,
+                keepUpToDate=False,
+                chartOptions=[]  
+            )
+            
+        except Exception as e:
+            self.log_message(f"Error requesting stock data: {e}")
+            messagebox.showerror("Error", f"Failed to request stock data")
+            return
+        
+        timeout = 15
+        start_time = time.time()
+        while 1 not in self.ib_app.hist_data and (time.time() - start_time) < timeout:
+            time.sleep(.1)
+            
+        
+        
+        
         
