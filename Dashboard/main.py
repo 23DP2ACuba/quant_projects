@@ -480,8 +480,124 @@ class EarningsDashboard:
         start_time = time.time()
         while 1 not in self.ib_app.hist_data and (time.time() - start_time) < timeout:
             time.sleep(.1)
+        
+
+        if 1 not in self.ib_app.hist_data:
+            self.log_message("Failed to get stock price data")
+            return
+
+        stock_data = pd.DataFrame(self.ib_app.hist_data[1])
+        stock_data["date"] = pd.to_datetime(stock_data["date"])
+        stock_data.set_index("date", inplace=True)
+        self.stock_data = stock_data
+        
+        self.log_message(f"Received {len(stock_data)} stock price datapoints")
+        
+        self.log_message("Querying VIX data")
+        vix_contract = self.create_vix_contract()
+        
+        if 2 in self.ib_app.hist_data:
+            del self.ib_app.hist_data[2]
             
+        try:
+            self.ib_app.requestHistoricalData(
+                reqId=2,
+                contract=vix_contract,
+                endDateTime=end_date.strftime("%Y%m%d %H:%M:%S"),
+                durationStr = "3 w",
+                barSizeSetting="1 day",
+                whatToShow="TRADES",
+                useRTH=1,
+                format_date=1,
+                keepUpToDate=False,
+                chartOptions=[]  
+            )
+            
+        except Exception as e:
+            self.log_message(f"Error requesting vix data: {e}")
         
+        start_time = time.time()
+        while 2 not in self.ib_app.hist_data and (time.time() - start_time) < timeout:
+            time.sleep(.1)
+            
+        if 2 in self.ib_app.hist_data:
+            vix_data = pd.DataFrame(self.ib_app.hist_data[2])
+            vix_data["date"] = pd.to_datetime(vix_data["date"])
+            vix_data.set_index("date", inplace=True)
+            self.vix_data = vix_data
+            
+            self.log_message(f"Received {len(vix_data)} vix datapoints")
+            
+        else:
+            self.log_message(f"VIX data not available")
+            self.vix_data = None
+            
+        self.log_message(f"Querying implied volatility data for {self.ticker}...")
         
+        if 3 in self.ib_app.hist_data:
+            del self.ib_app.hist_data[3]
+              
+        try:
+            self.ib_app.requestHistoricalData(
+                reqId=3,
+                contract=stock_contract,
+                endDateTime=end_date.strftime("%Y%m%d %H:%M:%S"),
+                durationStr = "3 w",
+                barSizeSetting="1 day",
+                whatToShow="OPTION_IMPLIED_VOLATILITY",
+                useRTH=1,
+                format_date=1,
+                keepUpToDate=False,
+                chartOptions=[]  
+            )
+            
+        except Exception as e:
+            self.log_message(f"Error requesting IV data: {e}")
+
+        start_time = time.time()
+        while 3 not in self.ib_app.hist_data and (time.time() - start_time) < timeout:
+            time.sleep(.1)
+            
+        if 3 in self.ib_app.hist_data:
+            iv_data = pd.DataFrame(self.ib_app.hist_data[3])
+            iv_data["date"] = pd.to_datetime(iv_data["date"])
+            iv_data.set_index("date", inplace=True)
+            
+            raw_iv = iv_data["close"]
+            if raw_iv.max > 5:
+                daily_iv_decimal = raw_iv / 100
+                iv_data["implied_vol"] = daily_iv_decimal
+                self.log_message(f"Received {len(iv_data)} IV datapoints - converted to annualized vol")
+            
+            else:
+                iv_data["implied_vol"] = raw_iv
+                self.log_message(f"Received {len(iv_data)} IV datapoints")
+                
+            self.iv_data = iv_data            
+            self.log_message("Successfully processed implied vol data")
+        else:
+            self.log_message(f"IV data not available - annualized vol")
+            self.iv_data = None
+            
+        self.perform_iv_crush_analysis()
         
+    def perform_iv_crush_analysis(self):
+        self.log_message("Performing IV crush analysis")
         
+        earnings_date = self.earnings_date
+        pre_earnings_date = earnings_date - timedelta(days=1)
+        post_earnings_date = earnings_date + timedelta(days=1)
+        
+        stock_dates = self.stock_data.index
+        
+        pre_date_actual = stock_dates[stock_dates <= earnings_date].max() if len(stock_dates[stock_dates <= earnings_date]) > 0 else stock_dates.min()
+        post_date_actual = stock_dates[stock_dates >= earnings_date].max() if len(stock_dates[stock_dates > earnings_date]) > 0 else stock_dates.max()
+        
+        self.log_message(f"Earnings Date: {earnings_date} | Pre-Date: {pre_date_actual} | Post-Date: {post_date_actual}")
+        
+        pre_stock_price = self.stock_data.loc[pre_date_actual, "close"]
+        post_open = self.stock_data.loc[post_date_actual, "open"]
+        post_close = self.stock_data.loc[post_date_actual, "close"]
+        
+         
+           
