@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.stats as si
+from statsmodels.tsa.seasonal import STL
 import yfinance as yf
 from datetime import datetime
 import statsmodels.api as sm
@@ -9,7 +10,13 @@ from xgboost import XGBRegressor
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from sklearn.metrics import (r2_score, 
+                             mean_squared_error, 
+                             mean_absolute_error)
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import copy
 
 
 # ----------------------------
@@ -33,8 +40,21 @@ config = {
         "Beta_vol": 3,
         "market_returns": 3,
         "Beta_simple": 2,
-        "Z-Score_i": 2
+        "Z-Score_i": 2,
+        "Trend": 3,
+        "Seasonal": 3,
+        "Residuals": 3,
     }
+}
+
+model_config = {
+    "n_estimators": 500,
+    "max_depth": 3,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1
 }
 
 # ----------------------------
@@ -73,45 +93,61 @@ def get_estimation(x, y, window):
         pd.Series(vannas, index=index)
     )
 
-def get_z_score(market_returns, w_norm):
-    return (market_returns - market_returns.rolling(w_norm).mean()) / market_returns.rolling(w_norm).std()
+def get_decomposition_result(data, period=21, robust=True):
+  data = data.copy()
+  stl = STL(data, period=period, robust=robust)
+  res = stl.fit()
+
+  return res.trend, res.seasonal, res.resid
+
+def get_z_score(returns, w_norm):
+    return (returns - returns.rolling(w_norm).mean()) / \
+        returns.rolling(w_norm).std()
 
 def get_sigma_hat(r_s, window):
     return r_s.ewm(span=window).std() * np.sqrt(252)
 
 def add_lags(df, lags_dict):
     df = df.copy()
+
     for feat, n_lags in lags_dict.items():
         for i in range(1, n_lags + 1):
             df[f"{feat}_{i}"] = df[feat].shift(i)
+            
     return df.dropna()
 
-def get_beta_gamma_vanna(market_returns, log_returns, sigma, window):
+def get_beta_gamma_vanna(returns, log_returns, sigma, window):
     sigma_diff = sigma.diff().fillna(0)
     X = pd.DataFrame({
-        'mkt': market_returns,
-        'mkt_sq': market_returns**2,
-        'mkt_interaction': market_returns * sigma_diff
+        'mkt': returns,
+        'mkt_sq': returns**2,
+        'mkt_interaction': returns * sigma_diff
     })
     y = log_returns
+
     return get_estimation(window=window, x=X, y=y)
 
 # ----------------------------
 # Feature computation
 # ----------------------------
-def compute_features(data, market_returns, config, target = "log_ret"):
-  log_returns = np.log(data["Close"] / data["Close"].shift())
-  df = pd.DataFrame({"log_returns": log_returns, "market_returns": market_returns}).dropna()
-
+def compute_features(df, config, target = "log_ret"):
   sigma_hat = get_sigma_hat(df["log_returns"], window=config['w_vol'])
   z_score = get_z_score(df["market_returns"], w_norm=config['w_norm'])
 
   beta_hat, gamma, vanna = get_beta_gamma_vanna(
-      df["market_returns"], df["log_returns"], sigma_hat, window=config['w_beta']
+      df["market_returns"], df["log_returns"], 
+      sigma_hat, window=config['w_beta']
   )
 
-  beta_simple = df["log_returns"].rolling(config['window']).cov(df["market_returns"]) / \
-                df["market_returns"].rolling(config['window']).var()
+  beta_simple = df["log_returns"].rolling(config['window'])\
+    .cov(df["market_returns"]) / df["market_returns"]\
+        .rolling(config['window']).var()
+
+  (dec_trend, dec_seasonal, dec_residuals) = get_decomposition_result(
+        data, 
+        period=21, 
+        robust=True
+      )
 
   df["Beta_simple"] = beta_simple
   df["Beta_hat_ewma"] = beta_hat.ewm(span=config['beta_span']).mean()
@@ -123,16 +159,21 @@ def compute_features(data, market_returns, config, target = "log_ret"):
   df["Sigma_hat"] = sigma_hat
   df["Epsilon"] = df["log_returns"] - beta_hat * df["market_returns"]
   df["Norm_Returns"] = df["log_returns"] / sigma_hat
-  
+  df["Trend"] = dec_trend
+  df["Seasonal"] = dec_seasonal
+  df["Residuals"] = dec_residuals
+
   if target == "alpha_component":
     future_returns = np.log(data["Close"].shift(-1) / data["Close"])
-    df["Target"] = future_returns - df["Beta_hat_ewma"] * df["market_returns"].shift(-1)
+    df["Target"] = future_returns - df["Beta_hat_ewma"] * \
+        df["market_returns"].shift(-1)
   else:
     df["Target"] = df["log_returns"].rolling(5).mean().shift(-1)
 
   df = add_lags(df, lags_dict=config['lags'])
   df = df.drop(["log_returns"], axis=1)
   df = df.dropna()
+
   return df
 
 # ----------------------------
@@ -167,54 +208,50 @@ def regression_metrics(y_true, y_pred, dataset_name=""):
     print(f"  RMSE: {rmse:.6f}")
     print(f"  MAE: {mae:.6f}")
     print(f"  Directional Accuracy: {direction_acc:.4f}\n")
+
     return r2, rmse, mae, direction_acc
 
+
 # ----------------------------
-# Compute returns and features
+# Compute returns
 # ----------------------------
 window = config.get("window")
 log_returns = np.log(data["Close"] / data["Close"].shift())
 market_returns = np.log(market["Close"] / market["Close"].shift())
-df = pd.DataFrame({"log_returns": log_returns, "market_returns": market_returns}).dropna()
-
-z_score = get_z_score(market_returns=df["market_returns"], w_norm=config.get("w_norm"))
-
-sigma_hat = get_sigma_hat(r_s=df["log_returns"], window=config.get("w_vol"))
-
-beta_hat, gamma, vanna = get_beta_gamma_vanna(df["market_returns"], df["log_returns"], sigma_hat, window=config.get("w_beta"))
-
-beta_simple = df["log_returns"].rolling(window).cov(df["market_returns"]) / df["market_returns"].rolling(window).var()
+df = pd.DataFrame({"log_returns": log_returns, 
+                   "market_returns": market_returns}).dropna()
 
 # ----------------------------
 # Assemble final features
 # ----------------------------
-df_features = compute_features(data, market_returns=np.log(market["Close"] / market["Close"].shift()), config=config)
+df_features = compute_features(df, config=config)
 
-x_train, x_test, y_train, y_test = preprocessing(df_features, test_size=0.2)
+x_train, x_test, y_train, y_test = preprocessing(df_features, test_size=0.2)  
+
+print(df_features.columns)
 
 model = XGBRegressor(
-    n_estimators=500,
-    max_depth=3,
-    learning_rate=0.05,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    reg_alpha=0.1,
-    reg_lambda=1
+    n_estimators=model_config["n_estimators"],
+    max_depth=model_config["max_depth"],
+    learning_rate=model_config["learning_rate"],
+    subsample=model_config["subsample"],
+    colsample_bytree=model_config["colsample_bytree"],
+    reg_alpha=model_config["reg_alpha"],
+    reg_lambda=model_config["reg_lambda"]
 )
 model.fit(x_train, y_train)
 
 y_train_pred = model.predict(x_train)
 y_test_pred = model.predict(x_test)
 
-train_metrics = regression_metrics(y_train, y_train_pred, dataset_name="Train")
-test_metrics  = regression_metrics(y_test, y_test_pred, dataset_name="Test")
+train_metrics = regression_metrics(y_train, y_train_pred, 
+                                   dataset_name="Train")
+test_metrics  = regression_metrics(y_test, y_test_pred, 
+                                   dataset_name="Test")
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import copy
-
-def walk_forward_plot(model, X_train, y_train, X_test, y_test, retrain=False, scaler=None, title="Walk-Forward Prediction"):
+def walk_forward_plot(model, X_train, y_train, X_test, y_test, 
+                      retrain=False, scaler=None, 
+                      title="Walk-Forward Prediction"):
 
     y_pred_walk = []
     y_true_walk = []
@@ -265,7 +302,8 @@ def walk_forward_plot(model, X_train, y_train, X_test, y_test, retrain=False, sc
 
     return np.array(y_pred_walk), metrics
 
-  y_walk_preds, metrics = walk_forward_plot(
+
+y_walk_preds, metrics = walk_forward_plot(
     model=model,
     X_train=x_train,
     y_train=y_train,
@@ -279,13 +317,15 @@ def walk_forward_plot(model, X_train, y_train, X_test, y_test, retrain=False, sc
 # Cash allocation simulation
 # ----------------------------
 
-def simulate_cash_allocation(initial_cash, model, X_train, y_train, X_test, y_test, retrain=False, scaler=None, allocation_factor=1.0):
+def simulate_cash_allocation(initial_cash, model, X_train, 
+                             y_train, X_test, y_test, retrain=False, 
+                             scaler=None, allocation_factor=1.0):
     """
     Simulate trading cash allocation over the test period based on predicted returns.
     - initial_cash: starting portfolio value
     - allocation_factor: multiplier that determines position size sensitivity to predicted return
     """
-    
+
     X_all = np.vstack([X_train, X_test])
     y_all = np.concatenate([y_train, y_test])
 
@@ -302,7 +342,7 @@ def simulate_cash_allocation(initial_cash, model, X_train, y_train, X_test, y_te
         y_true = y_test.iloc[i] if hasattr(y_test, "iloc") else y_test[i]
 
 
-        position = np.tanh(allocation_factor * y_pred) 
+        position = np.tanh(allocation_factor * y_pred)
         cash = cash * (1 + position * y_true)
         portfolio.append(cash)
 
@@ -344,13 +384,12 @@ def simulate_cash_allocation(initial_cash, model, X_train, y_train, X_test, y_te
 # ----------------------------
 
 portfolio_df = simulate_cash_allocation(
-    initial_cash=1000,           
+    initial_cash=1000,
     model=model,
     X_train=x_train,
     y_train=y_train,
     X_test=x_test,
     y_test=y_test,
     retrain=False,
-    allocation_factor=10.0         
+    allocation_factor=10.0
 )
-
