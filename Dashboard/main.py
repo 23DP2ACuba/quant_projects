@@ -598,6 +598,34 @@ class EarningsDashboard:
         pre_stock_price = self.stock_data.loc[pre_date_actual, "close"]
         post_open = self.stock_data.loc[post_date_actual, "open"]
         post_close = self.stock_data.loc[post_date_actual, "close"]
+        post_stock_price = (post_open + post_close) / 2
+
+        gap = (post_open - pre_stock_price) / pre_stock_price * 100
+        self.log_message(f"Overnight earnings gap: {gap}")
         
-         
-           
+        total_move = (post_close - pre_stock_price) / pre_stock_price * 100
+        self.log_message(f"Total Move %: {total_move}")
+
+        self.stock_price_label(text = f"${post_stock_price}")
+        
+        if self.vix_data is not None:
+            vix_dates = self.vix_data.index
+            pre_vix_date = vix_dates[vix_dates <= pre_earnings_date].max() if len(vix_dates[vix_dates <= pre_earnings_date]) > 0 else vix_dates.min()
+            post_vix_date = vix_dates[vix_dates <= pre_earnings_date].min() if len(vix_dates[vix_dates > pre_earnings_date]) > 0 else vix_dates.max()
+            
+            pre_vix = self.vix_dates.loc[pre_vix_date, "close"]
+            post_vix = self.vix_dates.loc[post_vix_date, "close"]
+            
+            self.log_message(f" Pre Earnings VIX: {pre_vix}")
+            self.log_message(f" Post Earnings VIX: {post_vix}")
+            self.vix_level_label.config(text="N/A")
+
+        else:
+            self.vix_level_label.config(text="N/A")
+
+            
+            
+            
+            
+            
+            
