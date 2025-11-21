@@ -622,10 +622,72 @@ class EarningsDashboard:
 
         else:
             self.vix_level_label.config(text="N/A")
+        
+        if self.i_data is not None:
+            iv_dates = self.iv_data.index
+            pre_iv_date = iv_dates[iv_dates <= pre_earnings_date].max() if len(iv_dates[iv_dates <= pre_earnings_date]) > 0 else iv_dates.min()
+            post_iv_date = iv_dates[iv_dates > pre_earnings_date].min() if len(iv_dates[iv_dates > pre_earnings_date]) > 0 else iv_dates.max()
+            
+            pre_iv = self.iv_data.loc[pre_iv_date, "implied_vol"]
+            post_iv = self.iv_data.loc[post_iv_date, "implied_vol"]
+            
+            self.log_message(f"Pre-Earnings IV: {pre_iv}")
+            self.log_message(f"Post-Earnings IV: {post_iv}")
+            
+            iv_crush = (pre_iv - post_iv) / pre_iv* 100
+            self.current_iv_label.config(text=f"{post_iv}")
+            self.pre_iv_label.config(text=f"{pre_iv}")
+            self.post_iv_label.config(text=f"{post_iv}")
+            self.iv_crush_label.config(text=f"{iv_crush}")
+            
+            try:
+                days_to_expiry = int(self.days_to_exp_var.get())
+            except ValueError:
+                days_to_expiry = 30
+                
+                self.days_to_exp_var.set("30")
+                
+            time_to_expiry = days_to_expiry / 365
+            atm_strike_price = pre_stock_price
+            
+            pre_call_price = self.black_scholes_call(pre_stock_price, atm_strike_price, time_to_expiry, self.risk_free_rate, pre_iv)
+            pre_put_price = self.black_scholes_put(pre_stock_price, atm_strike_price, time_to_expiry, self.risk_free_rate, pre_iv)
+            
+            post_call_price = self.black_scholes_call(post_stock_price, atm_strike_price, time_to_expiry, self.risk_free_rate, pre_iv)
+            post_put_price = self.black_scholes_put(pre_stock_price, atm_strike_price, time_to_expiry, self.risk_free_rate, pre_iv)
 
+            pre_straddle_price = pre_call_price + pre_put_price
+            post_straddle_price = post_call_price + post_put_price
+            
+            call_change_dollar = post_call_price  - pre_call_price
+            put_change_dollar = post_put_price - pre_put_price
+            
+            straddle_change_dollar = post_straddle_price - pre_straddle_price
+            
+            long_straddle_pnl = straddle_change_dollar
+            short_straddle_pnl = -straddle_change_dollar
+            
+            pre_call_delta = self.calculate_delta(pre_stock_price, atm_strike_price, time_to_expiry, pre_iv)
+            pre_put_delta = self.calculate_delta(pre_stock_price, atm_strike_price, time_to_expiry, pre_iv, "put")
+            pre_straddle_delta = pre_call_delta + pre_put_delta
+            
+            post_call_delta = self.calculate_delta(pre_stock_price, atm_strike_price, time_to_expiry, pre_iv)
+            post_put_delta = self.calculate_delta(pre_stock_price, atm_strike_price, time_to_expiry, pre_iv, "put")
+            post_straddle_delta = post_call_delta + post_put_delta
+            
+            delta_change = post_straddle_delta - pre_straddle_delta
+            
+            pre_call_vega = self.calculate_vega(pre_stock_price, atm_strike_price, time_to_expiry, self.risk_free_rate, pre_iv)
+            pre_straddle_vega = 2*pre_call_vega
+            
+            post_call_vega = self.calculate_vega(post_stock_price, atm_strike_price, time_to_expiry, self.risk_free_rate, post_iv)
+            post_straddle_vega = 2*post_call_vega
+            
+            vega_change = post_straddle_vega - pre_straddle_vega
             
             
             
             
+
             
             
