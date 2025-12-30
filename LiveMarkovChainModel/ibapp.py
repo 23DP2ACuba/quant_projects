@@ -1,8 +1,8 @@
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
-from ibapi.contract import Contract
 import threading as thr
 from dataclasses import dataclass
+from ibapi.contract import Contract 
 
 class IBApp(EWrapper, EClient):
     def __init__(self, callback=None):
@@ -48,7 +48,16 @@ class IBApp(EWrapper, EClient):
             self.bid_price = price
         elif tickType == 2:
             self.ask_price = price
-            
+
+    
+    def create_contract(self, symbol):
+        contract = Contract()
+        contract.symbol = symbol.upper()
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.currency = "USD"
+        return contract
+    
     
         
         
