@@ -68,8 +68,53 @@ class Dashboard:
                        background=[("active", "#f85149"), ("diabled", "#21262d")])
         
     def setup_ui(self):
-        pass
-    
+        main_frame = ttk.Frame(self.root, padding=15)
+        main_frame.grid(row=0, column=0, sticky="nsew")
+        self.root.columnconfigure(0,weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(2, weight=1)
+        
+        header_frame = ttk.Frame(main_frame)
+        header_frame.grid(row=0, column=0, sticky="ew",pady=(0, 15))
+        
+        title_lable= tk.Label(header_frame, text="Live Regime Swithcing",
+                              font=("JetBrains Mono", 18, "bold"), 
+                              bg="#0d1117", fg="#58a6ff")
+        title_lable.pack(side="left")
+        self.status_indicator = tk.Label(header_frame, text="DISCONNECTED", 
+                                         font=("JetBrains Mono", 18, "bold"), 
+                                        bg="#0d1117", fg="#f85149")
+        self.status_indicator.pack(side="right", padx=10)
+        control_frame = ttk.LableFrame(main_frame, text="Control Panel", padding="10")
+        control_frame.grid(row=1, column=0, sticky="ew", pady=(0, 15))
+        connection_section = ttk.Frame(control_frame)
+        connection_section.pack(fill="x", pady=(0, 10))
+        
+        ttk.Label(connection_section, text="HOST: ").pack(side="left", padx=(0, 5))
+        self.host_var = tk.StringVar(value="127.0.0.1")
+        host_entry = ttk.Entry(connection_section, textvariable=self.host_var, width=12)
+        host_entry.pack(side="left", padx=(0, 15))
+        
+        ttk.Label(connection_section, text="PORT: ").pack(side="left", padx=(0, 5))
+        self.port_var = tk.StringVar(value="7497")
+        port_entry = ttk.Entry(connection_section, textvariable=self.port_var, width=12)
+        port_entry.pack(side="left", padx=(0, 15))
+        
+        self.connect_btn = ttk.Button(connection_section, text="Connect", command=self.connect_ib)
+        self.connect_btn.pack(side="left", padx=(0, 5))
+        
+        self.disconnect_btn = ttk.Button(connection_section, text="Disconnect", command=self.disconnect_ib, state="disabled", style="Accent.TButton")
+        self.disconnect_btn.pack(side="left", padx=(0, 5))
+        
+        sep = ttk.Separator(control_frame, orient="horizontal")
+        sep.pack(fill="x", pady=10)
+        
+        data_section = ttk.Frame(control_frame)
+        data_section.pack(fill="x")
+        
+        
+        
     def setup_chart(self):
         pass
 
@@ -106,7 +151,32 @@ class Dashboard:
         except Exception as e:
             messagebox.showerror("Error", f"Connection error: {e}")
 
+    def disconnect_ib(self):
+        try:
+            if self.streaming:
+                self.stop_stream()
+                
+            self.ib_app.disconnect()
+            self.connected = False
+            self.connect_btn.config(state="normal")
+            self.disconnect_btn.config(state="disabled")
+            self.stream_btn.config(state="disabled")
+            self.status_indicator.config(text="DISCONNECTED", fg="#f83149")
+            
+        except Exception as e:
+            print(f"Disconnect error: {e}")
+            
+    def toggle_stream(self):
+        if not self.streaming:
+            self.start_stream()
+        else:
+            self.stop_stream()
+            
+            
+            
+    def start_stream(self):
+        pass
     
-
-
-
+    def stop_stream(self):
+        pass
+    
