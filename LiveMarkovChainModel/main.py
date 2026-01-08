@@ -5,7 +5,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
 
 def main():
     root = tk.Tk()
-    app = Dashboard()
+    app = Dashboard(root)
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()
     

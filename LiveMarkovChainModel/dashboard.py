@@ -12,8 +12,9 @@ from collections import deque
 import threading as thr
 
 
-class Dashboard:
+class Dashboard(MarkovRegime):
     def __init__(self, root):
+        super().__init__()
         self.root = root
         self.root.title("Live Market Data")
         self.root.geometry("1200x800")
@@ -37,7 +38,7 @@ class Dashboard:
         self.last_upate_time = None
         self.regime_model = MarkovRegime()
         
-        self.bar_lock = thr.lock()
+        self.bar_lock = thr.Lock()
         self.update_thread = None
         self.running = False
                 
@@ -59,13 +60,13 @@ class Dashboard:
         self.style.configure("TLabel", background=bg_color, foreground=fg_color,
                              font=("Segoe UI", 9, "bold"), padding=(10, 5))
         self.style.map("TButton",
-                       background=[("active", "#2ea043"), ("diabled", "#21262d")])
+                       background=[("active", "#2ea043"), ("disabled", "#21262d")])
         
         self.style.configure("TEntry", fieldbackground=entry_bg,
                              foreground=fg_color, insertcolor=fg_color)
         self.style.configure("Accent.TButton", background="#da3633", foreground="#ffffff")
         self.style.map("Accent.TButton",
-                       background=[("active", "#f85149"), ("diabled", "#21262d")])
+                       background=[("active", "#f85149"), ("disabled", "#21262d")])
         
     def setup_ui(self):
         main_frame = ttk.Frame(self.root, padding=15)
@@ -86,7 +87,7 @@ class Dashboard:
                                          font=("JetBrains Mono", 18, "bold"), 
                                         bg="#0d1117", fg="#f85149")
         self.status_indicator.pack(side="right", padx=10)
-        control_frame = ttk.LableFrame(main_frame, text="Control Panel", padding="10")
+        control_frame = ttk.LabelFrame(main_frame, text="Control Panel", padding="10")
         control_frame.grid(row=1, column=0, sticky="ew", pady=(0, 15))
         connection_section = ttk.Frame(control_frame)
         connection_section.pack(fill="x", pady=(0, 10))
@@ -112,6 +113,58 @@ class Dashboard:
         
         data_section = ttk.Frame(control_frame)
         data_section.pack(fill="x")
+        
+        ttk.Label(data_section, text="Symbol").pack(side="left", padx=(0, 5))
+        self.symbol_var = tk.StringVar(value="AAPL")
+        symbol_entry = ttk.Entry(data_section, textvariable=self.symbol_var,
+                                 width=10, font=("JetBrains Mono", 11))
+        symbol_entry.pack(side="left")
+        
+        self.stream_btn = ttk.Button(data_section, text="Start Stream", command = self.toggle_stream, state="disabled")
+        self.stream_btn.pack(side="left", padx=(0, 5))
+        
+        self.recal_btn = ttk.Button(data_section, text="Recalibrate", command=self.recalibrate_model, state="disabled")
+        self.recal_btn.pack(side="left", padx=(0, 15))
+        
+        price_frame = ttk.Frame(data_section)
+        price_frame.pack(side="left")
+        
+        ttk.Label(price_frame, text="Last Price:",
+                  font=("Segor UI", 10)).pack(side="left", padx=(0, 5))
+        self.price_label = tk.Label(price_frame, text="---.--",
+                                   font=('JetBrains Mono', 16, 'bold'),
+                                   bg='#0d1117', fg='#7ee787')
+        self.price_label.pack(side="left")
+
+                
+        chart_frame = ttk.LabelFrame(main_frame, text="OHLCL Regime", padding=10)
+        chart_frame.grid(row=2, column=0, sticky="nsew")
+        chart_frame.columnconfigure(0, weight=1)
+        chart_frame.rowconfigure(0, weight=1)
+        
+        self.chart_container = ttk.Frame(chart_frame)
+        self.chart_container.grid(row=0, column=0, sticky="nsew")
+        self.chart_container.columnconfigure(0, weight=1)
+        self.chart_container.rowconfigure(0, weight=1)
+        
+        stats_frame = ttk.Frame(main_frame)
+        stats_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        
+        self.stats_labels = {}
+        stats = [("Bars", 0), ("High", "--"), ("Low", "--"), ("Regime", "--"), ("TIck/Bar", "0")]
+        
+        for i, (name, value) in enumerate(stats):
+            frame = ttk.Frame(stats_frame)
+            frame.pack(side="left", padx=15)
+            ttk.Label(frame, text=f"{name}: ", font=("Segoe UI", 9)).pack(side="left")
+            label = tk.Label(frame, text=value, font=("JetBrains Mono", 10, "bold"),
+                              bg="#0d1117", fg="#8b949e")
+            label.pack(side="left", padx=(5, 0))
+            self.stats_labels[name] = label
+        
+        
+        
+            
         
         
         
@@ -179,4 +232,26 @@ class Dashboard:
     
     def stop_stream(self):
         pass
+    
+    def recalibrate_model(self):
+        pass
+    
+    def on_tick_data(self):
+        pass
+    
+    
+    def on_closing(self):
+        self.running = False
+        if hasattr(self, "_after_id"):
+            self.root.after_cancel(self._after_id)
+            
+        if self.connected:
+            try:
+                if self.streaming:
+                    self.ib_app.cancelMktData(1)
+                self.ib_app.disconnect()
+                
+            except:
+                pass
+        self.root.destroy()
     
