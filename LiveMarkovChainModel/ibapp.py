@@ -50,10 +50,10 @@ class IBApp(EWrapper, EClient):
             self.ask_price = price
 
     
-    def create_contract(self, symbol):
+    def create_contract(self, symbol:str, secType:str="STK"):
         contract = Contract()
         contract.symbol = symbol.upper()
-        contract.secType = "STK"
+        contract.secType = secType
         contract.exchange = "SMART"
         contract.currency = "USD"
         return contract

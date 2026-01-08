@@ -1,0 +1,17 @@
+from dataclasses import dataclass
+from typing import ClassVar
+
+@dataclass(frozen=True)
+class Theme:
+    BGCOLOR: ClassVar[str] = "#0d1117"
+    THEME: ClassVar[str] = "clam"
+    FGGRAY: ClassVar[str] = "#b7b8bc"
+    ACCENT: ClassVar[str] = "#238636"
+    ENTRYBG: ClassVar[str] = "#161b22"
+    FGRED: ClassVar[str] = "#f85149"
+    DISABLED: ClassVar[str] = "#21262d"
+    FACECOLOR: ClassVar[str] = "#161b22"
+    DARKGRAY: ClassVar[str] = "#30363d"
+    FGGREEN: ClassVar[str] = "#7ee787"
+    
+    

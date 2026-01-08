@@ -5,23 +5,25 @@ import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.patches import Rectangle  
 import matplotlib.dates as mdates   
+import matplotlib.pyplot as plt
 from datetime import datetime as datetime
 from ibapp import IBApp, OHLCBar
 from markov_model import MarkovRegime
 from collections import deque
 import threading as thr
+from utils import Theme
 
-
-class Dashboard(MarkovRegime):
+class Dashboard(Theme):
     def __init__(self, root):
-        super().__init__()
+        
         self.root = root
         self.root.title("Live Market Data")
         self.root.geometry("1200x800")
-        self.root.configure(bg="#0d1117")
+        
+        self.root.configure(bg=self.BGCOLOR)
         
         self.style = ttk.Style()
-        self.style.theme_use("clam")
+        self.style.theme_use(self.THEME)
         self.configure_dark_theme()
         
         self.ib_app = IBApp(callback=self.on_tick_data)
@@ -45,28 +47,23 @@ class Dashboard(MarkovRegime):
         self.setup_ui()
         self.setup_chart()
         
-    def configure_dark_theme(self):
-        bg_color = "#0d1117"
-        fg_color = "#c9d1d9"
-        accent_color = "#238636"
-        entry_bg = "#161b22"
-        
-        self.style.configure("TFrame", background=bg_color)
-        self.style.configure("TLabelframe", background=bg_color, foreground=fg_color)
-        self.style.configure("TLabelframe.Label", background=bg_color, foreground=fg_color,
+    def configure_dark_theme(self):        
+        self.style.configure("TFrame", background=self.BGCOLOR)
+        self.style.configure("TLabelframe", background=self.BGCOLOR, foreground=self.FGGRAY)
+        self.style.configure("TLabelframe.Label", background=self.BGCOLOR, foreground=self.FGGRAY,
                              font=("Segoe UI", 10, "bold"))
-        self.style.configure("TLabel", background=bg_color, foreground=fg_color,
+        self.style.configure("TLabel", background=self.BGCOLOR, foreground=self.FGGRAY,
                              font=("Segoe UI", 10))
-        self.style.configure("TLabel", background=bg_color, foreground=fg_color,
+        self.style.configure("TLabel", background=self.BGCOLOR, foreground=self.FGGRAY,
                              font=("Segoe UI", 9, "bold"), padding=(10, 5))
         self.style.map("TButton",
-                       background=[("active", "#2ea043"), ("disabled", "#21262d")])
+                       background=[("active", "#2ea043"), ("disabled", self.DISABLED)])
         
-        self.style.configure("TEntry", fieldbackground=entry_bg,
-                             foreground=fg_color, insertcolor=fg_color)
+        self.style.configure("TEntry", fieldbackground=self.ENTRYBG,
+                             foreground=self.FGGRAY, insertcolor=self.FGGRAY)
         self.style.configure("Accent.TButton", background="#da3633", foreground="#ffffff")
         self.style.map("Accent.TButton",
-                       background=[("active", "#f85149"), ("disabled", "#21262d")])
+                       background=[("active", self.FGRED), ("disabled", self.DISABLED)])
         
     def setup_ui(self):
         main_frame = ttk.Frame(self.root, padding=15)
@@ -81,11 +78,11 @@ class Dashboard(MarkovRegime):
         
         title_lable= tk.Label(header_frame, text="Live Regime Swithcing",
                               font=("JetBrains Mono", 18, "bold"), 
-                              bg="#0d1117", fg="#58a6ff")
+                              bg=self.BGCOLOR, fg="#58a6ff")
         title_lable.pack(side="left")
         self.status_indicator = tk.Label(header_frame, text="DISCONNECTED", 
                                          font=("JetBrains Mono", 18, "bold"), 
-                                        bg="#0d1117", fg="#f85149")
+                                        bg=self.BGCOLOR, fg=self.FGRED)
         self.status_indicator.pack(side="right", padx=10)
         control_frame = ttk.LabelFrame(main_frame, text="Control Panel", padding="10")
         control_frame.grid(row=1, column=0, sticky="ew", pady=(0, 15))
@@ -133,7 +130,7 @@ class Dashboard(MarkovRegime):
                   font=("Segor UI", 10)).pack(side="left", padx=(0, 5))
         self.price_label = tk.Label(price_frame, text="---.--",
                                    font=('JetBrains Mono', 16, 'bold'),
-                                   bg='#0d1117', fg='#7ee787')
+                                   bg=self.BGCOLOR, fg='#7ee787')
         self.price_label.pack(side="left")
 
                 
@@ -158,19 +155,36 @@ class Dashboard(MarkovRegime):
             frame.pack(side="left", padx=15)
             ttk.Label(frame, text=f"{name}: ", font=("Segoe UI", 9)).pack(side="left")
             label = tk.Label(frame, text=value, font=("JetBrains Mono", 10, "bold"),
-                              bg="#0d1117", fg="#8b949e")
+                              bg=self.BGCOLOR, fg=self.FGGRAY)
             label.pack(side="left", padx=(5, 0))
             self.stats_labels[name] = label
         
-        
-        
-            
-        
-        
-        
     def setup_chart(self):
-        pass
-
+        plt.style.use("dark_background")
+        
+        self.fig, self.ax = plt.subplots(figsize=(12, 6), facecolor=self.BGCOLOR)
+        self.ax.set_facecolor(self.FACECOLOR)
+        
+        self.ax.tick_params(color=self.FGGRAY, labelsize=9)
+        self.ax.spines["bottom"].set_color(self.DARKGRAY)
+        self.ax.spines["top"].set_color(self.DARKGRAY)
+        self.ax.spines["left"].set_color(self.DARKGRAY)
+        self.ax.spines["right"].set_color(self.DARKGRAY)
+        
+        self.ax.grid(True, alpha=.2, color=self.DARKGRAY, linestyle="--")
+        
+        self.ax.set_xlabel("Time", color=self.FGGRAY, fontsize=10)
+        self.ax.set_ylabel("Price", color=self.FGGRAY, fontsize=10)
+        self.ax.set_title("Waiting for data...", color=self.FGGRAY, fontsize=12, fontweight="bold")
+        
+        self.canvas = FigureCanvasTkAgg(self.fig, self.chart_container)
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        
+        self.fig.tight_layout()
+        self.canvas.draw()
+        
+        
+        
     def connect_ib(self):
         try:
             host = self.host_var.get()
@@ -178,7 +192,7 @@ class Dashboard(MarkovRegime):
             
             def connect_thread():
                 try:
-                    self.ib_app.connect()
+                    self.ib_app.connect(host, port, clientId=1)
                     self.ib_app.run()
                     
                 except Exception as e:
@@ -197,7 +211,7 @@ class Dashboard(MarkovRegime):
                 self.connect_btn.config(state="disabled")
                 self.disconnect_btn.config(state="normal")
                 self.stream_btn.config(state="normal")
-                self.status_indicator.config(text="CONNECTeD", fg="#7ee787")
+                self.status_indicator.config(text="CONNECTeD", fg=self.FGGREEN)
             else:
                 messagebox.showerror("Error", "Failed to connect to TWS")
                 
