@@ -16,3 +16,5 @@ class Theme:
     FGBLUE: ClassVar[str] = "#58a6ff"
     G_REG: ClassVar[tuple] = ("#39b950", "#7ee787")
     R_REG: ClassVar[tuple] = ("#f85149", "#ff7b72")
+    WHITE: ClassVar[str] = "#cbc9c9"
+    REG_CLRS: ClassVar[list] = ["#3fb950", "#d29922", "#f85149"]

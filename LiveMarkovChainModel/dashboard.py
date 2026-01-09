@@ -60,7 +60,7 @@ class Dashboard(Theme):
         
         self.style.configure("TEntry", fieldbackground=self.ENTRYBG,
                              foreground=self.FGGRAY, insertcolor=self.FGGRAY)
-        self.style.configure("Accent.TButton", background="#da3633", foreground="#ffffff")
+        self.style.configure("Accent.TButton", background="#da3633", foreground=self.WHITE)
         self.style.map("Accent.TButton",
                        background=[("active", self.FGRED), ("disabled", self.DISABLED)])
         
@@ -388,6 +388,40 @@ class Dashboard(Theme):
             self.ax.set_xlabel("Time", color=self.FGGRAY, fontsize=10)
             self.ax.set_ylabel("Price", color=self.FGGRAY, fontsize=10)
             
+            symbol = self.symbol_var.get().upper()
+            regime_names = ["LOW", "MED", "HIGH"]
+            curr_regime = regime_names[bars[-1].regime] if bars else "N/A"
+            self.ax.set_title(f"{symbol} - Regime: {curr_regime} | {len(bars)}/{self.max_bars} bars",
+                              color = self.WHITE, fontsize=12, fontweight="bold")
+            self.fig.tight_layout()
+            self.canvas.draw_idle()            
+    
+    def update_stats(self):
+        with self.bar_lock:
+            bars = list(self.ohlc_bars)
+            current = self.current_bar
+            
+        if current:
+            bars += [current]
+            
+        if not bars:
+            return
+        
+        self.stats_labels["Bars"].config(text=str(len(bars)))
+        highs = [b.high for b in bars]
+        lows = [b.low for b in bars]
+        
+        self.stats_labels["High"].config(text=f"{max(highs)}")
+        self.stats_labels["LOW"].config(text=f"{min(lows)}")
+        
+        regime_names = ["LOW", "MED", "HIGH"]
+        regime_colors = self.REG_CLRS
+        curr_regime = bars[-1].regime if bars else 0
+        self.stats_labels["Regime".config(text=regime_names[curr_regime], fg=regime_colors[curr_regime])]
+        
+        if current:
+           self.stats_labels["Ticks/Bae"].config(text=str(current.tick_count)) 
+        
         
     def recalibrate_model(self):
         pass
