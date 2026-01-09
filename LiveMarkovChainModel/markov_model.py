@@ -4,3 +4,6 @@ class MarkovRegime:
     
     def calibrate_model(self):
         pass
+    
+    def get_regime(self):
+        pass

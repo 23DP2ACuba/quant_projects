@@ -13,5 +13,6 @@ class Theme:
     FACECOLOR: ClassVar[str] = "#161b22"
     DARKGRAY: ClassVar[str] = "#30363d"
     FGGREEN: ClassVar[str] = "#7ee787"
-    
-    
+    FGBLUE: ClassVar[str] = "#58a6ff"
+    G_REG: ClassVar[tuple] = ("#39b950", "#7ee787")
+    R_REG: ClassVar[tuple] = ("#f85149", "#ff7b72")

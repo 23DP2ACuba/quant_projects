@@ -38,7 +38,6 @@ class Dashboard(Theme):
         self.bar_start_time = None
         self.price_history = deque(maxlen=100)
         self.last_upate_time = None
-        self.regime_model = MarkovRegime()
         
         self.bar_lock = thr.Lock()
         self.update_thread = None
@@ -78,7 +77,7 @@ class Dashboard(Theme):
         
         title_lable= tk.Label(header_frame, text="Live Regime Swithcing",
                               font=("JetBrains Mono", 18, "bold"), 
-                              bg=self.BGCOLOR, fg="#58a6ff")
+                              bg=self.BGCOLOR, fg=self.FGBLUE)
         title_lable.pack(side="left")
         self.status_indicator = tk.Label(header_frame, text="DISCONNECTED", 
                                          font=("JetBrains Mono", 18, "bold"), 
@@ -242,17 +241,172 @@ class Dashboard(Theme):
             
             
     def start_stream(self):
-        pass
+        if not self.connected:
+            return 
+        
+        symbol = self.symbol_var.get().upper()
+        if not symbol:
+            messagebox.showerror("Error", "No symbol name provided")
+            return
+
+        with self.bar_loc:
+            self.ohlc_bars.clear()
+            self.current_bar = None
+            self.bar_start_time = None
+            self.price_history.clear()
+            self.regime_model = MarkovRegime()
+        
+        contract = self.ib_app.create_contract(symbol)
+        
+        self.ib_app.historical_data.clear()
+        self.ib_app.hist_done.clear()
+        self.ib_app.reqHistoricalData(2, contract, "", "300 S","5 sec", "TRADES", 1, 1, False, [])
+        
+        if self.ib_app.hist_done.wait(timeout=10) and 2 in self.ib_app.historical_data:
+            self.regime_model.calibrate_model(self.ib_app.historical_data[2])
+            print(f"Calibrated regime model with {len(self.ib_app.historical_data[2])} bars")
+        
+        self.ib_app.reqMktData(1, contract, "", False, False, [])
+        
+        self.streaming = True
+        self.running = True
+        self.stream_btn.config(text="Stop Stream", style="Accent.TButton") 
+        self.recal_btn.config(state="normal")           
+        self.status_indicator.config(text=f"Streaming {symbol}", fg=self.FGBLUE)
+        
+        self.update_thread = thr.Thread(target=self.bar_manager_loop, daemon=True)
+        self.update_thread.start()
+        
+        self.update_chart_loop()
     
     def stop_stream(self):
-        pass
+        self.running = False
+        self.streaming = False
+        
+        try:
+            self.ib_app.cancelMktData(1)
+            
+        except Exception as e:
+            print(f"Error cancelling market data request: {e}")
+        
+        self.stream_btn.config(text="Start Streaming", style="TButton")
+        self.recal_btn.config(state="disabled")
+        self.status_indicator.config(text="CONNECTED", fg=self.FGGREEN)
+        
+    def bar_manager_loop(self):
+        while self.running:
+            time.sleep(.1)
+            
+            while self.bar_lock:
+                if self.current_bar is not None and self.bar_start_time is not None:
+                    elapsed = (datetime.now() - self.bar_start_time).total_seconds()
+                    
+                    if elapsed >= self.bar_duration:
+                        self.ohlc_bars.append(self.current_bar)
+                        self.regime_model.get_regime(list(self.ohlc_bars))
+                        last_price = self.current_bar.close
+                        self.current_bar = OHLCBar(datetime.now(), last_price)
+                        self.bar_start_time = datetime.now()
+                        
     
+    def update_chart_loop(self):
+        if not self.running:
+            return
+        self.draw_ohlcv()
+        self.update_stats()
+        self._after_id = self.root.after(200, self.update_chart_loop)
+        
+    def draw_ohlc_chart(self):
+        eps = 1e-3
+        self.ax.clear()
+        
+        with self.bar_lock:
+            bars = list(self.ohlc_bars)
+            current = self.current_bar
+            
+        if current is not None:
+            bars += [current]
+            
+        if not bars:
+            self.ax.set_facecolor(self.FACECOLOR)
+            self.ax.set_title("Waiting for data...", color=self.FGGRAY,
+                              fontsize=12, fontweight="bold")
+            self.ax.grid(True, alpha=.2, color=self.DARKGRAY, linestyle="--")
+            return 
+        
+        all_prices = [bar.low for bar in bars] + [bar.high for bar in bars]
+        price_min, price_max = min(all_prices), max(all_prices)
+        pricerange = price_max - price_min
+        pad = max(pricerange * .1, .01)
+        y_min, y_max = price_min - pad + price_max + pad
+        
+        if current is not None:
+            pass
+        
+        width = .6
+        for i, bar in enumerate(bars):
+            bg = Rectangle(
+                (i - .5, y_min),
+                1,
+                y_max - y_min,
+                face = (1, 1, 1, 0),
+                edgecolor=None,
+                alpha=0,
+                zorder=0,
+            )
+            
+            self.ax.add_patch(bg)
+            color, edge_color = self.G_REG if bar.close >= bar.open else self.R_REG
+            body_bottom, body_height = min(bar.oprn, bar.close), max(abs(bar.oprn, bar.close), eps)
+            
+            candle = Rectangle(
+                (i - width/2, body_bottom),
+                width,
+                body_height,
+                facecolor = color,
+                edge_color = edge_color,
+                linewidth = 1.5,
+                alpha=.9,
+                zorder=2
+            )
+            
+            self.ax.add_patch(candle)
+            self.ax.plot([i, i], [bar.low, body_bottom], color=edge_color, linewidth=1.5, zorder=1)
+            self.ax.plot([i, i], [body_bottom+body_height, bar.high], color=edge_color, linewidth=1.5, zorder=1)
+            
+            if i == len(bars) - 1 and current is not None:
+                self.ax.axvline(x=i, color=self.FGBLUE, alpha=.3, linestyle=":", linewidth=2)
+                
+            self.ax.set_facecolor(self.BGCOLOR)
+            x_labels = [bar.timestamp.strftime("%H:%M:%S") for bar in bars]
+            self.ax.set_xticks(range(len(bars)))
+            self.ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=8)
+            self.ax.set_ylim(y_min, y_max)
+            self.ax.set_xlim(-.5, max(self.max_bars - .5, len(bars) - .5))
+            
+            self.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x: .3f}"))
+            self.ax.set_xlabel("Time", color=self.FGGRAY, fontsize=10)
+            self.ax.set_ylabel("Price", color=self.FGGRAY, fontsize=10)
+            
+        
     def recalibrate_model(self):
         pass
     
-    def on_tick_data(self):
-        pass
-    
+    def on_tick_data(self, data_type, value, timestamp):
+        if data_type == "price" and value > 0:
+            with self.bar_lock:
+                self.price_history.append((timestamp, value))
+                
+                if self.current_bar is None:
+                    self.current_bar = OHLCBar(timestamp, value)
+                    self.bar_start_time = timestamp
+                    
+                else:
+                    self.current_bar.update(value)
+
+                
+            self.root.after(0, lambda: self.price_label.config(text=f"{value:.2f}"))    
+
     
     def on_closing(self):
         self.running = False
