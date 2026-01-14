@@ -18,3 +18,4 @@ class Theme:
     R_REG: ClassVar[tuple] = ("#f85149", "#ff7b72")
     WHITE: ClassVar[str] = "#cbc9c9"
     REG_CLRS: ClassVar[list] = ["#3fb950", "#d29922", "#f85149"]
+    REG_BG_CLRS: ClassVar[list] = ["#1a3d1a", "#3d3319", "#3d1a1a"]

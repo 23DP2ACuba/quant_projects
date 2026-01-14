@@ -1,10 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import time
-import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.patches import Rectangle  
-import matplotlib.dates as mdates   
 import matplotlib.pyplot as plt
 from datetime import datetime as datetime
 from ibapp import IBApp, OHLCBar
