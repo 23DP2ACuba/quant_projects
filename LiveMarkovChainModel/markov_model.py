@@ -16,8 +16,12 @@ class MarkovRegime(Theme):
         self.emission_stds = np.array([.0005, .002, .003])
         
     
-    def gaussian_likelyhood(self, vol, regime):
-        pass
+    def gaussian_likelihood(self, vol, regime):
+        mean = self.emission_means[regime]
+        std = self.emission_means[regime]
+        coef = 1/(std*np.sqrt(2*np.pi))
+        exponent = -.5*((vol-mean)/std)**2
+        return coef * exponent
     
     def calibrate_model(self, hist_bars):
         if len(hist_bars) < 20:
@@ -68,5 +72,36 @@ class MarkovRegime(Theme):
             
             
             
-    def get_regime(self):
-        pass
+    def get_regime(self, bars):
+        if not bars:
+            return self.current_state
+        
+        current_bar =bars[-1]
+        vol = current_bar.volatility
+        
+        if vol <= 0:
+            current_bar.regime = self.current_state
+            
+            return self.current_state
+        
+        prior_probs = self.transition_mtx.T @ self.state_probs
+        
+        likelihoods = np.array([self.gaussian_likelihood(vol, i) for i in range(self.n_states)])
+        
+        posterior_probs = prior_probs * likelihoods
+        
+        prob_sum = np.sum(posterior_probs)
+        if prob_sum > 0:
+            posterior_probs /= prob_sum
+        
+        else:
+            print("Error normalizing the posterior")
+            posterior_probs = prior_probs
+            
+        self.state_probs = posterior_probs
+        
+        
+        self.current_state = int(np.argmax(posterior_probs))
+        current_bar.regime = self.current_state
+        
+        return self.current_state
