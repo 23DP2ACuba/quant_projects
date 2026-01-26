@@ -339,7 +339,7 @@ class Dashboard(Theme):
         y_min, y_max = price_min - pad + price_max + pad
         
         if current is not None:
-            pass
+            current.regime = self.regime_model.current_state
         
         width = .6
         for i, bar in enumerate(bars):
@@ -347,9 +347,9 @@ class Dashboard(Theme):
                 (i - .5, y_min),
                 1,
                 y_max - y_min,
-                face = (1, 1, 1, 0),
+                face = self.regime_model.bg_colors[bar.regime],
                 edgecolor=None,
-                alpha=0,
+                alpha=.4,
                 zorder=0,
             )
             
@@ -422,8 +422,20 @@ class Dashboard(Theme):
         
         
     def recalibrate_model(self):
-        pass
+        if not self.streaming:return
+        contract = self.ib_app.create_contract(self.symbol_var.get().upper())
+        
+        self.ib_app.historical_data.clear()
+        self.ib_app.hist_done.clear()
+        
+        self.ib_app.reqHistoricalData(3, contract, "", "300 S", "5 secs", "TRADES", 1, 1, False)
     
+        if self.ib_app.hist_done.wait(timeout=10) and self.ib_app.historical_data:
+            with self.bar_lock:
+                self.regime_model.calibrate_model(self.ib_app.historical_data[3])
+                
+            print(f"Recalibrate MC model with {len(self.ib_app.historical_data[3])} bars")
+            
     def on_tick_data(self, data_type, value, timestamp):
         if data_type == "price" and value > 0:
             with self.bar_lock:
