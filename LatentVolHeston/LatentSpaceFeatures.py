@@ -19,7 +19,6 @@ class Params:
   pct: float = 0.95
   bounds = [(-1, 2), (1e-6, None)]
 
-
 class LatentSpaceVol(Params):
   def get_data(self):
     self.data = yf.Ticker(self.ticker).history(start=self.start, end=self.end, auto_adjust=False)[["Close"]]
@@ -78,21 +77,37 @@ class LatentSpaceVol(Params):
 
     return nll
 
+  def get_garch_params(self, r):
+    alphas, betas = [], []
+    steps = r.shape[0]
+    for i in range(self.garch_window, r.shape[0]):
+      train_data = r[i - self.garch_window:i]
+      model = arch_model(train_data, rescale=False, p=1, q=1)
+      model_fit= model.fit(disp="off")
+
+      params = model_fit.params
+      alphas.append(params["alpha[1]"])
+      betas.append(params["beta[1]"])
+
+    filler = [np.nan] * (self.garch_window+1)
+    
+    return  np.array(filler+alphas), np.array(filler+betas)
+
 
   def get_features(self):
     r = self.data["Close"].pct_change()
     r2 = r**2
+    r.dropna(inplace=True)
+
     self.data["RealizedVOl"] = np.sqrt(r2.rolling(window=self.vol_window).mean())
 
     self.data["StdDev"] = r.rolling(window=self.vol_window).std()
 
     self.data["MAD"] = r.rolling(window=self.vol_window).apply(lambda x: np.mean(np.abs(x-np.mean(x))))
-    
-    tcm_cols = ["xi", "CTE", "TV", "Skew", "Kurt"]
-    tcm = pd.DataFrame(index=self.data.index, columns=tcm_cols)
-
     print("caculating tcm:")
     step = np.floor(len(r)/15)
+    tcm_cols = ["xi", "CTE", "TV", "Skew", "Kurt"]
+    tcm = pd.DataFrame(index=self.data.index, columns=tcm_cols)
 
     for i in range(self.tcm_window, len(r)):
       window = r.iloc[i - self.tcm_window:i].dropna()
@@ -103,5 +118,13 @@ class LatentSpaceVol(Params):
 
     self.data = pd.concat([self.data, tcm], axis=1)
 
+    print(f"\ncaculating garch parameters:")
+    
+    alphas, betas = self.get_garch_params(r)
+
+    self.data["Presistance"], self.data["Alpha"] = (alphas+betas), alphas
     self.data.dropna(inplace=True)
+
+    self.data.dropna(inplace=True)
+
 
