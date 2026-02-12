@@ -4,6 +4,8 @@ import yfinance as yf
 from scipy.stats import genpareto
 import math
 import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 from dataclasses import dataclass
 
 @dataclass
@@ -125,6 +127,8 @@ class LatentSpaceVol(Params):
     self.data["Presistance"], self.data["Alpha"] = (alphas+betas), alphas
     self.data.dropna(inplace=True)
 
-    self.data.dropna(inplace=True)
+    def normalize(df):
+      scaler = StandardScaler()
+      df_scaled = pd.DataFrame(scaler.fit_transform(df), columns=df.columns, index=df.index)
 
-
+    self.df_normalized = normalize(self.data)
