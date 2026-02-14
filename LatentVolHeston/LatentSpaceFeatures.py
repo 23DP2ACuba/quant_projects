@@ -27,6 +27,7 @@ class LatentSpaceVol(Params):
 
   def get_tail_data(self, returns):
     L = np.abs(returns[returns < 0])
+
     if len(L) < 10:
       return np.nan, np.nan, np.nan, np.nan, np.nan
 
@@ -92,11 +93,12 @@ class LatentSpaceVol(Params):
       betas.append(params["beta[1]"])
 
     filler = [np.nan] * (self.garch_window+1)
-    
+
     return  np.array(filler+alphas), np.array(filler+betas)
 
 
   def get_features(self):
+    eps = 1e-5
     r = self.data["Close"].pct_change()
     r2 = r**2
     r.dropna(inplace=True)
@@ -108,7 +110,7 @@ class LatentSpaceVol(Params):
     self.data["MAD"] = r.rolling(window=self.vol_window).apply(lambda x: np.mean(np.abs(x-np.mean(x))))
     print("caculating tcm:")
     step = np.floor(len(r)/15)
-    tcm_cols = ["xi", "CTE", "TV", "Skew", "Kurt"]
+    tcm_cols = ["Xi", "CTE", "TV", "Skew", "Kurt"]
     tcm = pd.DataFrame(index=self.data.index, columns=tcm_cols)
 
     for i in range(self.tcm_window, len(r)):
@@ -119,16 +121,28 @@ class LatentSpaceVol(Params):
 
 
     self.data = pd.concat([self.data, tcm], axis=1)
-
+    self.data["Xi"] = pd.to_numeric(self.data["Xi"], errors="coerce")
+    self.data["CTE"] = pd.to_numeric(self.data["CTE"], errors="coerce")
+    self.data["Xi"] = np.tanh(self.data["Xi"].values)
+    self.data["CTE"] = np.log(self.data["CTE"])
     print(f"\ncaculating garch parameters:")
-    
+
     alphas, betas = self.get_garch_params(r)
 
     self.data["Presistance"], self.data["Alpha"] = (alphas+betas), alphas
+    self.data.drop(["Close"], axis=1, inplace=True)
     self.data.dropna(inplace=True)
 
     def normalize(df):
+
       scaler = StandardScaler()
       df_scaled = pd.DataFrame(scaler.fit_transform(df), columns=df.columns, index=df.index)
+      return df_scaled
 
     self.df_normalized = normalize(self.data)
+
+
+
+
+
+
