@@ -29,21 +29,20 @@ class DataStore(Dataset):
 
 
 class Encoder(nn.Module):
-    def __init__(self, input_dim=11, num_layers=3, d_model=64, 
-                 nhead=4, seq_len=100):
+    def __init__(self, params: dict):
         super().__init__()
 
-        self.fc_in = nn.Linear(input_dim, d_model)
+        self.fc_in = nn.Linear(params["input_dim"], params["d_model"])
 
         self.pos_embd = nn.Parameter(
-            torch.randn(1, seq_len, d_model)
+            torch.randn(1, params["seq_len"], params["d_model"])
         )
 
         enc_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=4*d_model,
-            dropout=0.1,
+            d_model=params["d_model"],
+            nhead=params["nhead"],
+            dim_feedforward=4*params["d_model"],
+            dropout=params["dropout"],
             activation="gelu",
             batch_first=True,
             norm_first=True
@@ -51,10 +50,10 @@ class Encoder(nn.Module):
 
         self.transformer_encoder = nn.TransformerEncoder(
             enc_layer,
-            num_layers=num_layers
+            num_layers=params["num_layers"]
         )
 
-        self.fc_out = nn.Linear(d_model, 1)
+        self.fc_out = nn.Linear(params["d_model"], 1)
 
     def forward(self, x):
         batch_size, seq_len, _ = x.shape
@@ -64,12 +63,11 @@ class Encoder(nn.Module):
 
         x = self.transformer_encoder(x)
 
-        z_t = x[:, -1, :]         
+        z_t = x[:, -1, :]
 
         y_pred = self.fc_out(z_t)
 
         return y_pred, z_t
-    
 
 class Decoder(nn.Module):
     def __init__(self, latent_dim):
@@ -77,6 +75,43 @@ class Decoder(nn.Module):
         
     def forward(self, x):
         pass
+
+class LatentSpaceModel(DataStore, Encoder, Decoder):
+  def __init__(self, data, params):
+    Encoder.__init__(self, params["encoder_params"])
+    # Decoder.__init__(self, params["decoder_params"])
+    self.losses = ["rec", "smooth", "EVT", "conserv", "metric", "directional", "prior"]
+    self.data = data
+
+    self.lams = [1] + [0.01]*(len(self.losses)-1)
+
+  def reconstruction_loss(self, y_pred, y_true):
+    return torch.mean((y_pred - y_true)**2)
+
+  def smoothness_loss(self):
+    return np.sum((self.z_t[1:] - self.z_t[:-1])**2)
+
+  def velocity_loss(self):
+    return np.sum((self.z_t.shift(-1) - self.z_t)-(self.z_t - self.z_t.shift(1))**2)
+
+  def conservative_loss(self):
+    pass
+
+  def composite_loss(y_true, y_pred, z_t):
+    self.z_t = z_t
+    self.y_pred, self.y_true = y_pred, y_true
+    eps = 1e-5
+    losses = 0
+    loss_funcs = [self.reconstruction_loss, self.velocity_loss, self.conservative_loss]
+    for i in range(len(self.losses)):
+      losses += self.lams[i] * loss_funcs[i]()
+
+    return losses
+
+
+  def train(self):
+    pass
+
 
 class NMVMDistribution:
     def __init__(self, latent_dim, W_dist='gamma'):
@@ -100,3 +135,4 @@ class NMVMDistribution:
             raise ValueError("Unsupported W distribution")
 
         return W
+
