@@ -71,13 +71,15 @@ class Encoder(nn.Module):
         return y_pred, z_t
 
 class Decoder(nn.Module):
-    def __init__(self, latent_dim):
-        super(Decoder, self).__init__()
-        
-    def forward(self, x):
-        pass
+  def __init__(self):
+    super().__init__()
+    self.fc_in = nn.Linear(model_params["d_model"], 64)
+    self.fc_out = nn.Linear(model_params["d_model"], 64)
 
-
+  def forward(self, z_t):
+    x = func.gelu(self.fc_in(z_t))
+    out = self.fc_out(x)
+    return x
 
 class NMVMDistribution:
     def __init__(self, latent_dim, W_dist='gamma'):
@@ -167,40 +169,41 @@ class LatentSpaceModel(LatentSpaceVol):
     self.generate_features()
     print(self.data.head())
 
-  def train(self):
-    model = Encoder(self.params)
-    criterion = CompositeLoss(self.lambdas)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    train_loader = DataLoader()
+  def train(self):
+    epochs = self.train_settings["epochs"]
+    device = self.train_settings["device"]
+    lambda_params = torch.tensor(self.lambdas, requires_grad=True)
+
+    model = Encoder(self.encoder_params)
+    criterion = CompositeLoss(lambda_params)
+    optimizer_model = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer_lambda = torch.optim.Adam([lambda_params], lr=0.001)
+
+    train_loader = DataLoader(self.data)
+    model.train()
     for epoch in range(epochs):
-        model.train()
-        total_loss=[]
         for xi, yi in train_loader:
           xi.to(device)
           yi.to(device)
 
+          y, z = model(xi)
+
           optimizer.zero_grad()
 
-          out = model(xi)
-          loss = criterion(out, yi)
-          loss.backward()
+          loss = criterion(y, yi)
+          loss.backward(retain_graph=True)
           optimizer.step()
-          total_loss.append(loss.item())
+
+          optimizer_lambda.zero_grad()
+          loss.backward()
+          optimizer_lambda.step()
+
+          criterion.l = lambda_params.detach().numpy()
 
         print(f"Epoch: {epoch+1}, Train Loss: {sum(total_loss)/len(total_loss)}")
-        if val_loader:
-          eval_loss=[]
-          model.eval()
-          with torch.no_grad():
-            for xi, yi in val_loader:
-              xi.to(device)
-              yi.to(device)
-
-              out = model(xi)
-              loss = criterion(out, yi)
-              train_losses.append(loss.item())
-            print(f"Eval Loss: {sum(total_loss)/len(total_loss)}")
     return model
+
     
+
 
