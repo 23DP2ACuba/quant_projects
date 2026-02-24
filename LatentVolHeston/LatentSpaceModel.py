@@ -4,29 +4,34 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import torch.nn.functional as func
 
+import numpy as np
+
 class DataStore(Dataset):
     def __init__(self, data, feature_cols, target_col="RealizedVol", seq_len=60):
+      self.seq_len = seq_len
+      self.xi_target = data["Xi"].values
 
-        self.seq_len = seq_len
+      self.features = data[feature_cols].values
 
-        self.features = data[feature_cols].values
+      self.target = data[target_col].shift(-1).values
 
-        self.target = data[target_col].shift(-1).values
-
-        self.features = self.features[:-1]
-        self.target = self.target[:-1]
+      self.features = self.features[:-1]
+      self.target = self.target[:-1]
 
     def __len__(self):
-        return len(self.features) - self.seq_len
+      return len(self.features) - self.seq_len
 
     def __getitem__(self, idx):
-        x = self.features[idx: idx + self.seq_len]
-        y = self.target[idx + self.seq_len - 1]
+      
+      x = self.features[idx: idx + self.seq_len]
+      y = self.target[idx + self.seq_len - 1]
+      xi_target = np.abs(np.log(self.xi_target[idx + self.seq_len - 1]) - np.log(self.xi_target[idx + self.seq_len - 2]))
 
-        x = torch.tensor(x, dtype=torch.float32)
-        y = torch.tensor(y, dtype=torch.float32)
+      x = torch.tensor(x, dtype=torch.float32)
+      y = torch.tensor(y, dtype=torch.float32)
 
-        return x, y
+      return x, y, xi_target
+
 
 class Encoder(nn.Module):
     def __init__(self, model_params: dict):
@@ -71,15 +76,22 @@ class Encoder(nn.Module):
         return y_pred, z_t
 
 class Decoder(nn.Module):
-  def __init__(self):
+  def __init__(self, model_params):
     super().__init__()
-    self.fc_in = nn.Linear(model_params["d_model"], 64)
-    self.fc_out = nn.Linear(model_params["d_model"], 64)
+    d_model = model_params["d_model"]
+    param_dim = model_params["latent_dim"]
+    self.decoder = nn.Sequential(
+        nn.Linear(d_model, 2*d_model),
+        nn.GELU(),
+        nn.LayerNorm(2*d_model),
+        nn.Linear(2*d_model, d_model),
+        nn.GELU(),
+        nn.Linear(d_model, param_dim)
+    )
 
   def forward(self, z_t):
-    x = func.gelu(self.fc_in(z_t))
-    out = self.fc_out(x)
-    return x
+    return self.decoder(z_t)
+
 
 class NMVMDistribution:
     def __init__(self, latent_dim, W_dist='gamma'):
@@ -107,7 +119,7 @@ class NMVMDistribution:
 class CompositeLoss:
   def __init__(self, lambdas):
     self.l = lambdas
-    
+
   def rec_loss(self, y_pred, y_true):
     return func.mse_loss(y_pred, y_true)
 
@@ -137,6 +149,34 @@ class CompositeLoss:
     return torch.mean((z-mu)**2 / sigma)
 
 
+  def __call__(self, y_true, y_pred, z_t, nmvm_params, xi_target, W):
+    mu = nmvm_params[:, 0]
+    beta = nmvm_params[:, 1]
+    sigma = nmvm_params[:, 2]
+    alpha = nmvm_params[:, 3]
+    delta = nmvm_params[:, 4]
+    xi_pred = nmvm_params[:, 5]
+    v_t = mu + beta*W + torch.sqrt(W)*np.sqrt(sigma) @ eps
+    vol_target = torch.mean(y_true)
+    eps = torch.randn_like(z_t)
+
+    total_loss = 0
+    losses = {
+        "rec": self.rec_loss(y_pred, y_true),
+        "smooth": self.smoothness_loss(z),
+        "EVT": self.evt_loss(xi_pred, xi_target),
+        "metric": self.metric_loss(z_t, vol_target),
+        "conservative": self.conservative_loss(v_t, vol_target),
+        "directional": self.directional_loss(z_t),
+        "prior": self.prior_loss(z_t, mu, sigma)
+    }
+
+    for k in losses:
+      total_loss += self.l[k] * losses[k]
+
+    return total_loss, losses
+
+
   def __call__(self, inputs):
     y_true, y_pred, z, vol_pred, vol_target, xi_pred, xi_target, mu, sigma = inputs
     total_loss = 0
@@ -158,10 +198,11 @@ class CompositeLoss:
 class LatentSpaceModel(LatentSpaceVol):
   def __init__(self, feature_params, model_params, lambdas):
     super().__init__(
-        feature_params=feature_params
-      )
-    self.encoder_params = model_params["encoder_params"]
-    self.lambdas = lambdas
+      feature_params=feature_params
+    )
+    self.model_params = model_params["model_params"]
+    self.decoder_params = model_params["model_params"]
+    self.lambdas = np.array(list(lambdas.values()))
     self.train_settings = model_params["train_settings"]
 
   def generate_data(self):
@@ -173,25 +214,35 @@ class LatentSpaceModel(LatentSpaceVol):
   def train(self):
     epochs = self.train_settings["epochs"]
     device = self.train_settings["device"]
+    lr = self.train_settings["lr"]
+    batch_size = self.train_settings["batch_size"]
     lambda_params = torch.tensor(self.lambdas, requires_grad=True)
 
-    model = Encoder(self.encoder_params)
+    encoder = Encoder(self.encoder_params)
+    decoder = Decoder(self.decoder_params)
     criterion = CompositeLoss(lambda_params)
-    optimizer_model = torch.optim.Adam(model.parameters(), lr=0.001)
-    optimizer_lambda = torch.optim.Adam([lambda_params], lr=0.001)
+    optimizer_model = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer_lambda = torch.optim.Adam(lambda_params, lr=lr)
 
     train_loader = DataLoader(self.data)
     model.train()
     for epoch in range(epochs):
-        for xi, yi in train_loader:
+        for xi, yi, xi_target_i in train_loader:
           xi.to(device)
           yi.to(device)
 
-          y, z = model(xi)
-
+          y, z = encoder(xi)
+          nmvm_params = decoder(z)
           optimizer.zero_grad()
 
-          loss = criterion(y, yi)
+          loss = criterion(
+              y_true=y, 
+              y_pred=yi, 
+              z_t=z_t, 
+              nmvm_params=nmvm_params,
+              xi_target=xi_target_i 
+              W=y
+          )
           loss.backward(retain_graph=True)
           optimizer.step()
 
@@ -204,6 +255,8 @@ class LatentSpaceModel(LatentSpaceVol):
         print(f"Epoch: {epoch+1}, Train Loss: {sum(total_loss)/len(total_loss)}")
     return model
 
-    
+
+
+
 
 
