@@ -80,6 +80,8 @@ class Decoder(nn.Module):
     super().__init__()
     d_model = model_params["d_model"]
     param_dim = model_params["latent_dim"]
+    self.k_min = 2.0
+    self.theta_min = 0.2
     self.decoder = nn.Sequential(
         nn.Linear(d_model, 2*d_model),
         nn.GELU(),
@@ -89,8 +91,14 @@ class Decoder(nn.Module):
         nn.Linear(d_model, param_dim)
     )
 
+    self.k_layer = nn.Linear(d_model, 1)
+    self.theta_layer = nn.Linear(d_model, 1)
+
   def forward(self, z_t):
-    return self.decoder(z_t)
+    nmvm_params = self.decoder(z_t)
+    k_pred = func.softplus(self.k_layer(z_t)) + self.k_min
+    theta_pred = func.softplus(self.theta_layer(z_t)) + self.theta_min
+    return nmvm_params,  k_pred, theta_pred
 
 
 class NMVMDistribution:
@@ -176,25 +184,6 @@ class CompositeLoss:
 
     return total_loss, losses
 
-
-  def __call__(self, inputs):
-    y_true, y_pred, z, vol_pred, vol_target, xi_pred, xi_target, mu, sigma = inputs
-    total_loss = 0
-    losses = {
-        "rec": self.rec_loss(y_pred, y_true),
-        "smooth": self.smoothness_loss(z),
-        "EVT": self.evt_loss(xi_pred, xi_target),
-        "metric": self.metric_loss(z, vol_target),
-        "conservative": self.conservative_loss(vol_pred, vol_target),
-        "directional": self.directional_loss(z),
-        "prior": self.prior_loss(z, mu, sigma)
-    }
-
-    for k in losses:
-      total_loss += self.l[k] * losses[k]
-
-    return total_loss, losses
-
 class LatentSpaceModel(LatentSpaceVol):
   def __init__(self, feature_params, model_params, lambdas):
     super().__init__(
@@ -232,16 +221,17 @@ class LatentSpaceModel(LatentSpaceVol):
           yi.to(device)
 
           y, z = encoder(xi)
-          nmvm_params = decoder(z)
+          nmvm_params, k, theta = decoder(z)
           optimizer.zero_grad()
+          W = k*theta
 
           loss = criterion(
-              y_true=y, 
-              y_pred=yi, 
-              z_t=z_t, 
+              y_true=y,
+              y_pred=yi,
+              z_t=z_t,
               nmvm_params=nmvm_params,
-              xi_target=xi_target_i 
-              W=y
+              xi_target=xi_target_i,
+              W=W
           )
           loss.backward(retain_graph=True)
           optimizer.step()
@@ -254,9 +244,6 @@ class LatentSpaceModel(LatentSpaceVol):
 
         print(f"Epoch: {epoch+1}, Train Loss: {sum(total_loss)/len(total_loss)}")
     return model
-
-
-
 
 
 
