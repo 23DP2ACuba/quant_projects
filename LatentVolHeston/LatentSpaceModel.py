@@ -7,12 +7,11 @@ import torch.nn.functional as func
 import numpy as np
 
 class DataStore(Dataset):
-    def __init__(self, data, feature_cols, target_col="RealizedVol", seq_len=60):
+    def __init__(self, data, feature_cols, target_col="RealizedVOl", seq_len=60):
       self.seq_len = seq_len
       self.xi_target = data["Xi"].values
 
       self.features = data[feature_cols].values
-
       self.target = data[target_col].shift(-1).values
 
       self.features = self.features[:-1]
@@ -22,7 +21,7 @@ class DataStore(Dataset):
       return len(self.features) - self.seq_len
 
     def __getitem__(self, idx):
-      
+
       x = self.features[idx: idx + self.seq_len]
       y = self.target[idx + self.seq_len - 1]
       xi_target = np.abs(np.log(self.xi_target[idx + self.seq_len - 1]) - np.log(self.xi_target[idx + self.seq_len - 2]))
@@ -30,13 +29,12 @@ class DataStore(Dataset):
       x = torch.tensor(x, dtype=torch.float32)
       y = torch.tensor(y, dtype=torch.float32)
 
-      return x, y, xi_target
-
+      return (x, y, xi_target)
 
 class Encoder(nn.Module):
     def __init__(self, model_params: dict):
         super().__init__()
-        
+
 
         self.fc_in = nn.Linear(model_params["input_dim"], model_params["d_model"])
 
@@ -62,7 +60,8 @@ class Encoder(nn.Module):
         self.fc_out = nn.Linear(model_params["d_model"], 1)
 
     def forward(self, x):
-        batch_size, seq_len, _ = x.shape
+        seq_len, _ = x.shape
+        print(x.shape)
 
         x = self.fc_in(x)
         x = x + self.pos_embd[:, :seq_len, :]
@@ -189,34 +188,42 @@ class LatentSpaceModel(LatentSpaceVol):
     super().__init__(
       feature_params=feature_params
     )
-    self.model_params = model_params["model_params"]
+    self.encoder_params = model_params["model_params"]
     self.decoder_params = model_params["model_params"]
-    self.lambdas = np.array(list(lambdas.values()))
+    self.lambdas = list(lambdas.values())
+    self.lambda_params = torch.nn.Parameter(
+      torch.tensor(self.lambdas, dtype=torch.float32)
+    )
     self.train_settings = model_params["train_settings"]
+    self.load_or_generate_features()
 
-  def generate_data(self):
-    self.get_price_data()
-    self.generate_features()
-    print(self.data.head())
+  def load_or_generate_features(self):
+    filename = f"features_{self.params.ticker}.parquet"
+    if os.path.exists(filename):
+      self.data = pd.read_parquet(filename)
+    else:
+      self.get_price_data()
+      self.generate_features()
+      self.data.to_parquet(filename)
 
 
-  def train(self):
+  def fit(self):
     epochs = self.train_settings["epochs"]
     device = self.train_settings["device"]
     lr = self.train_settings["lr"]
     batch_size = self.train_settings["batch_size"]
-    lambda_params = torch.tensor(self.lambdas, requires_grad=True)
 
     encoder = Encoder(self.encoder_params)
     decoder = Decoder(self.decoder_params)
-    criterion = CompositeLoss(lambda_params)
-    optimizer_model = torch.optim.Adam(model.parameters(), lr=lr)
-    optimizer_lambda = torch.optim.Adam(lambda_params, lr=lr)
+    criterion = CompositeLoss(self.lambdas)
+    optimizer_model = torch.optim.Adam(list(encoder.parameters())+list(decoder.parameters()), lr=lr)
+    optimizer_lambda = torch.optim.Adam([self.lambda_params], lr=lr)
+    print(self.data)
+    train_loader = DataStore(self.data, feature_cols=self.data.columns)
 
-    train_loader = DataLoader(self.data)
-    model.train()
     for epoch in range(epochs):
         for xi, yi, xi_target_i in train_loader:
+          print(xi.shape)
           xi.to(device)
           yi.to(device)
 
@@ -244,6 +251,3 @@ class LatentSpaceModel(LatentSpaceVol):
 
         print(f"Epoch: {epoch+1}, Train Loss: {sum(total_loss)/len(total_loss)}")
     return model
-
-
-
