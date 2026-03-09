@@ -23,15 +23,14 @@ class DataStore(Dataset):
     def __getitem__(self, idx):
       x = self.features[idx: idx + self.seq_len]
       y = self.target[idx: idx + self.seq_len]
-      
-      xi_target = np.abs(np.log(self.xi_target[idx + self.seq_len - 1]) - np.log(self.xi_target[idx + self.seq_len - 2]))
+
+      xi_target = self.xi_target[idx + self.seq_len]
       xi_target = torch.tensor(xi_target, dtype=torch.float32).unsqueeze(0)
 
       x = torch.tensor(x, dtype=torch.float32)
       y = torch.tensor(y, dtype=torch.float32).unsqueeze(0)
 
       return (x, y, xi_target)
-
 
 class Encoder(nn.Module):
     def __init__(self, model_params: dict):
@@ -70,9 +69,7 @@ class Encoder(nn.Module):
         x = self.transformer_encoder(x)
         z_seq = x
 
-        y_pred = self.fc_out(x)
-
-        return y_pred, z_seq
+        return z_seq
 
 class Decoder(nn.Module):
   def __init__(self, model_params):
@@ -83,7 +80,7 @@ class Decoder(nn.Module):
 
     self.log_alpha = nn.Parameter(torch.tensor(0.0))
     self.log_theta = nn.Parameter(torch.tensor(0.0))
-    
+
     self.decoder = nn.Sequential(
         nn.Linear(d_model, 2*d_model),
         nn.GELU(),
@@ -92,52 +89,60 @@ class Decoder(nn.Module):
         nn.GELU(),
         nn.Linear(d_model, param_dim)
     )
-  
-  def sample(self, nmvm_params):
-    alpha = torch.exp(self.log_alpha)
-    theta = torch.exp(self.log_theta)
-    nmvm_params = nmvm_params.transpose(1, 2)
-    mu = nmvm_params[:, 0]
-    beta = nmvm_params[:, 1]
-    sigma = torch.nn.functional.softplus(nmvm_params[:, 2]) + 1e-6
-
-    gamma_dist = dist.Gamma(alpha, 1/theta)
-    W = gamma_dist.sample((self.seq_len,))
-
-    eps = torch.randn(self.seq_len)
-
-    return mu + beta * W + sigma * torch.sqrt(W) * eps
-
 
   def forward(self, z_t):
-    nmvm_params = self.decoder(z_t)
-    X = self.sample(nmvm_params)
-    
-    return nmvm_params, X
+    return self.decoder(z_t)
 
 
-class NMVMDistribution:
-    def __init__(self, latent_dim, W_dist='gamma'):
-        self.latent_dim = latent_dim
-        self.mu = torch.zeros(latent_dim)
-        self.beta = torch.zeros(latent_dim)
-        self.Sigma = torch.eye(latent_dim)
-        self.W_dist = W_dist
+class NMVM(nn.Module):
+  def __init__(self, dim):
+    super().__init__()
+    self.dim = dim
 
-    def sample_W(self, n_samples):
-        """
-        Sample W from chosen mixing distribution.
-        """
-        if self.W_dist == 'gamma':
-            shape, scale = 2.0, 1.0  # example parameters
-            W = torch.distributions.Gamma(shape, scale).sample((n_samples,))
-        elif self.W_dist == 'inverse_gaussian':
-            # Placeholder: implement Inverse Gaussian
-            W = torch.ones(n_samples)
-        else:
-            raise ValueError("Unsupported W distribution")
+    self.mu = nn.Parameter(torch.zeros(dim))
+    self.beta = nn.Parameter(torch.zeros(dim))
 
-        return W
+    self.L_unconstrained = nn.Parameter(torch.eye(dim))
+
+    self.log_alpha = nn.Parameter(torch.tensor(0.0))
+    self.log_theta = nn.Parameter(torch.tensor(0.0))
+    self.L = None
+
+  def _get_L(self):
+    L = torch.tril(self.L_unconstrained)
+    diag = torch.diagonal(L)
+    L = L - torch.diag(diag) + torch.diag(torch.exp(diag))
+    return L
+
+  @property
+  def _params(self):
+    return {
+        "mu": self.mu.detach().cpu().numpy(),
+        "beta": self.beta.detach().cpu().numpy(),
+        "alpha": torch.exp(self.log_alpha).detach().cpu().numpy(),
+        "theta": torch.exp(self.log_theta).detach().cpu().numpy(),
+        "L": self.L.detach().cpu().numpy()
+    }
+    if len(self.L) > 0:
+      return [self.mu, self.beta, self.log_alpha, self.log_theta, self.L]
+    else:
+      return [self.mu, self.beta, self.log_alpha, self.log_theta]
+
+
+  def sample(self, n):
+    device = self.mu.device
+    alpha = torch.exp(self.log_alpha)
+    theta = torch.exp(self.log_theta)
+
+    self.L = self._get_L()
+    gamma = dist.Gamma(alpha, 1/theta)
+    W = gamma.sample((n,)).to(device)
+
+    eps = torch.randn(n, self.dim, device=device)
+
+    X = self.mu + self.beta*W.unsqueeze(-1) + torch.sqrt(W).unsqueeze(-1)*(eps @ self.L.T)
+
+    return X
 
 class CompositeLoss(nn.Module):
   def __init__(self):
@@ -171,16 +176,19 @@ class CompositeLoss(nn.Module):
     loss = (z - mu)**2 / sigma_safe
     return torch.mean(loss)
 
-  def forward(self, y_true, y_pred, nmvm_params, xi_target, v_t):
-    xi_pred = nmvm_params[:, 5]
+  def forward(self, y_true, y_pred, z_sim, nmvm_params, xi_target):
+    L = nmvm_params.get("L", 0)
+    alpha = nmvm_params.get("alpha", 0) 
+    xi_pred = L**2/(2*alpha) if alpha == 0 else torch.zeros_like(xi_target)
     total_loss = 0
     losses = []
 
     losses.append(self.rec_loss(y_pred, y_true[:, -1]))
-    losses.append(self.smoothness_loss(nmvm_params))
+    losses.append(self.smoothness_loss(z_sim))
     losses.append(self.evt_loss(xi_pred, xi_target))
-    losses.append(self.metric_loss(nmvm_params, y_true))
-    losses.append(self.conservative_loss(v_t, y_true))
+    losses.append(self.metric_loss(z_sim, y_true))
+    vol_pred = torch.norm(z_sim, dim=-1)
+    losses.append(self.conservative_loss(vol_pred, y_true))
 
     if any(i.isnan() for i in losses):
       print(losses)
@@ -188,7 +196,7 @@ class CompositeLoss(nn.Module):
     for i, loss in enumerate(losses):
       precision = torch.exp(-self.log_vars[i])
       total_loss = total_loss + precision * loss + self.log_vars[i]
-      
+
     return total_loss
 
 class LatentSpaceModel(LatentSpaceVol):
@@ -215,47 +223,60 @@ class LatentSpaceModel(LatentSpaceVol):
       self.data.to_parquet(filename)
 
   def sample(self):
-    pass
+    return 
 
 
   def fit(self):
     epochs = self.train_settings["epochs"]
     device = self.train_settings["device"]
+    print(device)
     lr = self.train_settings["lr"]
     batch_size = self.train_settings["batch_size"]
 
     encoder = Encoder(self.encoder_params)
     decoder = Decoder(self.decoder_params)
+    nmvm = NMVM(self.decoder_params["latent_dim"])
     criterion = CompositeLoss()
 
     optimizer = torch.optim.Adam(
-        list(encoder.parameters())+list(decoder.parameters())+list(criterion.parameters()), 
+        (
+            list(encoder.parameters())
+            +list(decoder.parameters())
+            +list(criterion.parameters())
+            +list(nmvm.parameters())
+        ),
         lr=lr
     )
+    self.data = self.data.dropna()
 
     train_loader = DataStore(self.data, feature_cols=self.data.columns)
+    epoch_loss = []
 
     for epoch in range(epochs):
-        for x, y, xi_target_i in train_loader:
+        for x, y, xi in train_loader:
           x.to(device)
           y.to(device)
-          xi_target_i.to(device)
+          xi.to(device)
 
           optimizer.zero_grad()
 
-          y_pred, z = encoder(x)
-          nmvm_params, v_t = decoder(z)
+          z_real = encoder(x)
+          y_pred = decoder(z_real)
+          z_sim = nmvm.sample(z_real.shape[0])
+          nmvm_params = nmvm._params
 
           loss = criterion(
               y_true=y,
               y_pred=y_pred,
+              xi_target=xi,
               nmvm_params=nmvm_params,
-              xi_target=xi_target_i,
-              v_t=v_t
+              z_sim=z_sim
           )
 
           loss.backward()
           optimizer.step()
+          epoch_loss.append(loss.item())
 
-        print(f"Epoch: {epoch+1}, Train Loss: {sum(total_loss)/len(total_loss)}")
-    return model
+        print(f"Epoch: {epoch+1}, Train Loss: {sum(epoch_loss)/len(epoch_loss)}")
+    return nmvm
+
