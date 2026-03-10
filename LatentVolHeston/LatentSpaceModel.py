@@ -3,7 +3,7 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import torch.nn.functional as func
-
+from tqdm import tqdm
 import numpy as np
 
 class DataStore(Dataset):
@@ -27,15 +27,16 @@ class DataStore(Dataset):
       xi_target = self.xi_target[idx + self.seq_len]
       xi_target = torch.tensor(xi_target, dtype=torch.float32).unsqueeze(0)
 
-      x = torch.tensor(x, dtype=torch.float32)
+      x = torch.from_numpy(np.array(x, dtype=np.float32))
       y = torch.tensor(y, dtype=torch.float32).unsqueeze(0)
 
       return (x, y, xi_target)
 
+
 class Encoder(nn.Module):
     def __init__(self, model_params: dict):
         super().__init__()
-
+        self.seq_len = model_params["seq_len"]
 
         self.fc_in = nn.Linear(model_params["input_dim"], model_params["d_model"])
 
@@ -61,10 +62,8 @@ class Encoder(nn.Module):
         self.fc_out = nn.Linear(model_params["d_model"], model_params["seq_len"])
 
     def forward(self, x):
-        seq_len, _ = x.shape
-
         x = self.fc_in(x)
-        x = x + self.pos_embd[:, :seq_len, :]
+        x = x + self.pos_embd[:, :self.seq_len, :]
 
         x = self.transformer_encoder(x)
         z_seq = x
@@ -75,7 +74,7 @@ class Decoder(nn.Module):
   def __init__(self, model_params):
     super().__init__()
     d_model = model_params["d_model"]
-    param_dim = model_params["latent_dim"]
+    output_dim = model_params["output_dim"]
     self.seq_len = model_params["seq_len"]
 
     self.log_alpha = nn.Parameter(torch.tensor(0.0))
@@ -87,7 +86,7 @@ class Decoder(nn.Module):
         nn.LayerNorm(2*d_model),
         nn.Linear(2*d_model, d_model),
         nn.GELU(),
-        nn.Linear(d_model, param_dim)
+        nn.Linear(d_model, output_dim)
     )
 
   def forward(self, z_t):
@@ -163,11 +162,12 @@ class CompositeLoss(nn.Module):
     return func.mse_loss(xi_pred, xi_target)
 
   def metric_loss(self, z_seq, vol_seq):
-    dz = torch.norm(z_seq[:, 1] - z_seq[:, :-1])
+    dz = torch.norm(z_seq[:, 1:] - z_seq[:, :-1])
     dvol = torch.abs(vol_seq[:, 1:] - vol_seq[:, :-1])
     return func.mse_loss(dz, dvol)
 
   def conservative_loss(self, vol_pred, vol_target):
+    print(vol_pred.shape, vol_target.shape)
     under = torch.clamp(vol_target - vol_pred, min=0)
     return torch.mean(under**2)
 
@@ -178,17 +178,17 @@ class CompositeLoss(nn.Module):
 
   def forward(self, y_true, y_pred, z_sim, nmvm_params, xi_target):
     L = nmvm_params.get("L", 0)
-    alpha = nmvm_params.get("alpha", 0) 
+    alpha = nmvm_params.get("alpha", 0)
     xi_pred = L**2/(2*alpha) if alpha == 0 else torch.zeros_like(xi_target)
     total_loss = 0
     losses = []
 
-    losses.append(self.rec_loss(y_pred, y_true[:, -1]))
+    losses.append(self.rec_loss(y_pred, y_true))
     losses.append(self.smoothness_loss(z_sim))
     losses.append(self.evt_loss(xi_pred, xi_target))
     losses.append(self.metric_loss(z_sim, y_true))
     vol_pred = torch.norm(z_sim, dim=-1)
-    losses.append(self.conservative_loss(vol_pred, y_true))
+    losses.append(self.conservative_loss(z_sim, y_true))
 
     if any(i.isnan() for i in losses):
       print(losses)
@@ -210,6 +210,7 @@ class LatentSpaceModel(LatentSpaceVol):
     self.encoder_params = model_params["model_params"]
     self.decoder_params = model_params["model_params"]
     self.train_settings = model_params["train_settings"]
+    self.seq_len = model_params["model_params"]["seq_len"]
 
 
   def load_or_generate_features(self):
@@ -223,20 +224,19 @@ class LatentSpaceModel(LatentSpaceVol):
       self.data.to_parquet(filename)
 
   def sample(self):
-    return 
+    return
 
 
   def fit(self):
     epochs = self.train_settings["epochs"]
     device = self.train_settings["device"]
-    print(device)
     lr = self.train_settings["lr"]
     batch_size = self.train_settings["batch_size"]
 
-    encoder = Encoder(self.encoder_params)
-    decoder = Decoder(self.decoder_params)
-    nmvm = NMVM(self.decoder_params["latent_dim"])
-    criterion = CompositeLoss()
+    encoder = Encoder(self.encoder_params).to(device)
+    decoder = Decoder(self.decoder_params).to(device)
+    nmvm = NMVM(self.decoder_params["latent_dim"]).to(device)
+    criterion = CompositeLoss().to(device)
 
     optimizer = torch.optim.Adam(
         (
@@ -249,14 +249,23 @@ class LatentSpaceModel(LatentSpaceVol):
     )
     self.data = self.data.dropna()
 
-    train_loader = DataStore(self.data, feature_cols=self.data.columns)
+    dataset = DataStore(self.data, feature_cols=self.data.columns)
+    train_loader = DataLoader(
+        dataset, 
+        batch_size=batch_size, 
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True
+        )
+
     epoch_loss = []
 
     for epoch in range(epochs):
-        for x, y, xi in train_loader:
-          x.to(device)
-          y.to(device)
-          xi.to(device)
+        for x, y, xi in tqdm(train_loader):
+
+          x = x.to(device)
+          y = y.to(device)
+          xi = xi.to(device)
 
           optimizer.zero_grad()
 
@@ -279,4 +288,3 @@ class LatentSpaceModel(LatentSpaceVol):
 
         print(f"Epoch: {epoch+1}, Train Loss: {sum(epoch_loss)/len(epoch_loss)}")
     return nmvm
-
