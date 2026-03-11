@@ -147,7 +147,7 @@ class CompositeLoss(nn.Module):
   def __init__(self):
     super().__init__()
 
-    losses = ["rec", "smooth", "EVT", "conservative", "metric"]
+    losses = ["rec", "smooth", "EVT", "conservative", "metric", "prior"]
     self.num_losses = len(losses)
 
     self.log_vars = nn.Parameter(torch.zeros(self.num_losses))
@@ -161,34 +161,36 @@ class CompositeLoss(nn.Module):
   def evt_loss(self, xi_pred, xi_target):
     return func.mse_loss(xi_pred, xi_target)
 
-  def metric_loss(self, z_seq, vol_seq):
-    dz = torch.norm(z_seq[:, 1:] - z_seq[:, :-1])
-    dvol = torch.abs(vol_seq[:, 1:] - vol_seq[:, :-1])
+  def metric_loss(self, vol_pred, vol_true):
+    dz = vol_pred[:, 1:] - vol_pred[:, :-1]
+    dvol = vol_true[:, 1:] - vol_true[:, :-1]
     return func.mse_loss(dz, dvol)
 
   def conservative_loss(self, vol_pred, vol_target):
-    print(vol_pred.shape, vol_target.shape)
     under = torch.clamp(vol_target - vol_pred, min=0)
     return torch.mean(under**2)
 
   def prior_loss(self, z, mu, sigma):
-    sigma_safe = torch.clamp(sigma, min=1e-6)
+    sigma_safe = torch.clamp(torch.diag(sigma), min=1e-6)
     loss = (z - mu)**2 / sigma_safe
     return torch.mean(loss)
 
   def forward(self, y_true, y_pred, z_sim, nmvm_params, xi_target):
-    L = nmvm_params.get("L", 0)
-    alpha = nmvm_params.get("alpha", 0)
-    xi_pred = L**2/(2*alpha) if alpha == 0 else torch.zeros_like(xi_target)
+    L = nmvm_params.get("L")
+    mu = nmvm_params.get("mu")
+    alpha = nmvm_params.get("alpha")
+    cov = L @ L.T
+    xi_pred = torch.trace(cov) / (2 * alpha + 1e-8)
+    xi_pred = xi_pred.expand_as(xi_target)
     total_loss = 0
     losses = []
 
     losses.append(self.rec_loss(y_pred, y_true))
     losses.append(self.smoothness_loss(z_sim))
     losses.append(self.evt_loss(xi_pred, xi_target))
-    losses.append(self.metric_loss(z_sim, y_true))
-    vol_pred = torch.norm(z_sim, dim=-1)
-    losses.append(self.conservative_loss(z_sim, y_true))
+    losses.append(self.metric_loss(y_pred, y_true))
+    losses.append(self.conservative_loss(y_pred, y_true))
+    losses.append(self.prior_loss(y_pred, mu, L))
 
     if any(i.isnan() for i in losses):
       print(losses)
@@ -198,7 +200,7 @@ class CompositeLoss(nn.Module):
       total_loss = total_loss + precision * loss + self.log_vars[i]
 
     return total_loss
-
+      
 class LatentSpaceModel(LatentSpaceVol):
   def __init__(self, feature_params, model_params):
     super().__init__(
@@ -288,3 +290,4 @@ class LatentSpaceModel(LatentSpaceVol):
 
         print(f"Epoch: {epoch+1}, Train Loss: {sum(epoch_loss)/len(epoch_loss)}")
     return nmvm
+
