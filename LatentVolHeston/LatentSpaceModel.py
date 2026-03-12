@@ -33,6 +33,7 @@ class DataStore(Dataset):
       return (x, y, xi_target)
 
 
+
 class Encoder(nn.Module):
     def __init__(self, model_params: dict):
         super().__init__()
@@ -105,7 +106,6 @@ class NMVM(nn.Module):
 
     self.log_alpha = nn.Parameter(torch.tensor(0.0))
     self.log_theta = nn.Parameter(torch.tensor(0.0))
-    self.L = None
 
   def _get_L(self):
     L = torch.tril(self.L_unconstrained)
@@ -116,17 +116,12 @@ class NMVM(nn.Module):
   @property
   def _params(self):
     return {
-        "mu": self.mu.detach().cpu().numpy(),
-        "beta": self.beta.detach().cpu().numpy(),
-        "alpha": torch.exp(self.log_alpha).detach().cpu().numpy(),
-        "theta": torch.exp(self.log_theta).detach().cpu().numpy(),
-        "L": self.L.detach().cpu().numpy()
+        "mu": self.mu,
+        "beta": self.beta,
+        "alpha": torch.exp(self.log_alpha),
+        "theta": torch.exp(self.log_theta),
+        "L": self.L.detach()
     }
-    if len(self.L) > 0:
-      return [self.mu, self.beta, self.log_alpha, self.log_theta, self.L]
-    else:
-      return [self.mu, self.beta, self.log_alpha, self.log_theta]
-
 
   def sample(self, n):
     device = self.mu.device
@@ -162,6 +157,7 @@ class CompositeLoss(nn.Module):
     return func.mse_loss(xi_pred, xi_target)
 
   def metric_loss(self, vol_pred, vol_true):
+    vol_true = vol_true.permute(0, 2, 1)
     dz = vol_pred[:, 1:] - vol_pred[:, :-1]
     dvol = vol_true[:, 1:] - vol_true[:, :-1]
     return func.mse_loss(dz, dvol)
@@ -181,7 +177,9 @@ class CompositeLoss(nn.Module):
     alpha = nmvm_params.get("alpha")
     cov = L @ L.T
     xi_pred = torch.trace(cov) / (2 * alpha + 1e-8)
+    xi_pred = torch.softmax(xi_pred) * 0.5
     xi_pred = xi_pred.expand_as(xi_target)
+
     total_loss = 0
     losses = []
 
@@ -190,10 +188,13 @@ class CompositeLoss(nn.Module):
     losses.append(self.evt_loss(xi_pred, xi_target))
     losses.append(self.metric_loss(y_pred, y_true))
     losses.append(self.conservative_loss(y_pred, y_true))
-    losses.append(self.prior_loss(y_pred, mu, L))
+    losses.append(self.prior_loss(y_pred, mu, cov))
 
     if any(i.isnan() for i in losses):
       print(losses)
+
+    print(self.log_vars)
+    print(losses)
 
     for i, loss in enumerate(losses):
       precision = torch.exp(-self.log_vars[i])
@@ -214,7 +215,6 @@ class LatentSpaceModel(LatentSpaceVol):
     self.train_settings = model_params["train_settings"]
     self.seq_len = model_params["model_params"]["seq_len"]
 
-
   def load_or_generate_features(self):
     filename = f"features_{self.params.ticker}.parquet"
     if os.path.exists(filename):
@@ -227,7 +227,6 @@ class LatentSpaceModel(LatentSpaceVol):
 
   def sample(self):
     return
-
 
   def fit(self):
     epochs = self.train_settings["epochs"]
@@ -253,12 +252,12 @@ class LatentSpaceModel(LatentSpaceVol):
 
     dataset = DataStore(self.data, feature_cols=self.data.columns)
     train_loader = DataLoader(
-        dataset, 
-        batch_size=batch_size, 
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-        )
+      dataset,
+      batch_size=batch_size,
+      shuffle=False,
+      num_workers=4,
+      pin_memory=True
+    )
 
     epoch_loss = []
 
@@ -276,6 +275,7 @@ class LatentSpaceModel(LatentSpaceVol):
           z_sim = nmvm.sample(z_real.shape[0])
           nmvm_params = nmvm._params
 
+
           loss = criterion(
               y_true=y,
               y_pred=y_pred,
@@ -289,5 +289,5 @@ class LatentSpaceModel(LatentSpaceVol):
           epoch_loss.append(loss.item())
 
         print(f"Epoch: {epoch+1}, Train Loss: {sum(epoch_loss)/len(epoch_loss)}")
-    return nmvm
+
 
