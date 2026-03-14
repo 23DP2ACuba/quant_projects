@@ -120,7 +120,8 @@ class NMVM(nn.Module):
         "beta": self.beta,
         "alpha": torch.exp(self.log_alpha),
         "theta": torch.exp(self.log_theta),
-        "L": self.L.detach()
+        "L": self.L.detach(),
+        "dof": 2*torch.exp(self.log_alpha)
     }
 
   def sample(self, n):
@@ -129,7 +130,7 @@ class NMVM(nn.Module):
     theta = torch.exp(self.log_theta)
 
     self.L = self._get_L()
-    gamma = dist.Gamma(alpha, 1/theta)
+    gamma = dist.InverseGamma(alpha, 1/theta)
     W = gamma.sample((n,)).to(device)
 
     eps = torch.randn(n, self.dim, device=device)
@@ -145,7 +146,7 @@ class CompositeLoss(nn.Module):
     losses = ["rec", "smooth", "EVT", "conservative", "metric", "prior"]
     self.num_losses = len(losses)
 
-    self.log_vars = nn.Parameter(torch.zeros(self.num_losses))
+    self.log_vars = nn.Parameter(torch.ones(self.num_losses) * 0.1)
 
   def rec_loss(self, y_pred, y_true):
     return func.mse_loss(y_pred.squeeze(-1), y_true.squeeze(-1))
@@ -154,51 +155,49 @@ class CompositeLoss(nn.Module):
     return torch.mean((z[:, 1:] - z[:, :-1])**2)
 
   def evt_loss(self, xi_pred, xi_target):
+    xi_pred = xi_pred.expand_as(xi_target)
     return func.mse_loss(xi_pred, xi_target)
 
   def metric_loss(self, vol_pred, vol_true):
-    vol_true = vol_true.permute(0, 2, 1)
-    dz = vol_pred[:, 1:] - vol_pred[:, :-1]
-    dvol = vol_true[:, 1:] - vol_true[:, :-1]
+    vol_true = vol_true.reshape(vol_true.shape[0], -1)
+    dz = torch.norm(vol_pred[:, 1:] - vol_pred[:, :-1], dim=-1)
+    dvol = torch.abs(vol_true[:, 1:] - vol_true[:, :-1])
     return func.mse_loss(dz, dvol)
 
   def conservative_loss(self, vol_pred, vol_target):
     under = torch.clamp(vol_target - vol_pred, min=0)
     return torch.mean(under**2)
 
-  def prior_loss(self, z, mu, sigma):
-    sigma_safe = torch.clamp(torch.diag(sigma), min=1e-6)
-    loss = (z - mu)**2 / sigma_safe
-    return torch.mean(loss)
+  def prior_loss(self, z, mu, L):
+    diff = (z-mu).T
+    solved = torch.linalg.solve_triangular(L, diff, upper=False)
+    loss = torch.mean(torch.sum(solved**2, dim=0))
+    return loss
 
-  def forward(self, y_true, y_pred, z_sim, nmvm_params, xi_target):
+  def forward(self, y_true, y_pred, z_real, nmvm_params, xi_target):
     L = nmvm_params.get("L")
     mu = nmvm_params.get("mu")
-    alpha = nmvm_params.get("alpha")
-    cov = L @ L.T
-    xi_pred = torch.trace(cov) / (2 * alpha + 1e-8)
-    xi_pred = torch.softmax(xi_pred) * 0.5
-    xi_pred = xi_pred.expand_as(xi_target)
+    nu = nmvm_params.get("dof")
+
+    xi_pred = 1/nu
 
     total_loss = 0
     losses = []
 
     losses.append(self.rec_loss(y_pred, y_true))
-    losses.append(self.smoothness_loss(z_sim))
+    losses.append(self.smoothness_loss(z_real))
     losses.append(self.evt_loss(xi_pred, xi_target))
-    losses.append(self.metric_loss(y_pred, y_true))
+    losses.append(self.metric_loss(z_real, y_true))
     losses.append(self.conservative_loss(y_pred, y_true))
-    losses.append(self.prior_loss(y_pred, mu, cov))
+    losses.append(self.prior_loss(z_real, mu, L))
 
     if any(i.isnan() for i in losses):
       print(losses)
 
-    print(self.log_vars)
-    print(losses)
+    log_vars = torch.clamp(self.log_vars, -5, 5)
 
-    for i, loss in enumerate(losses):
-      precision = torch.exp(-self.log_vars[i])
-      total_loss = total_loss + precision * loss + self.log_vars[i]
+    precision = torch.exp(-log_vars)
+    total_loss = precision * torch.stack(loss) + log_vars
 
     return total_loss
       
@@ -225,8 +224,9 @@ class LatentSpaceModel(LatentSpaceVol):
       self.generate_features()
       self.data.to_parquet(filename)
 
-  def sample(self):
-    return
+  def sample(self, num_paths, num_steps):
+    z_sim = self.nmvm.sample(self.n)
+    return self.decoder(z_sim)
 
   def fit(self):
     epochs = self.train_settings["epochs"]
@@ -236,7 +236,7 @@ class LatentSpaceModel(LatentSpaceVol):
 
     encoder = Encoder(self.encoder_params).to(device)
     decoder = Decoder(self.decoder_params).to(device)
-    nmvm = NMVM(self.decoder_params["latent_dim"]).to(device)
+    self.nmvm = NMVM(self.decoder_params["latent_dim"]).to(device)
     criterion = CompositeLoss().to(device)
 
     optimizer = torch.optim.Adam(
@@ -244,7 +244,7 @@ class LatentSpaceModel(LatentSpaceVol):
             list(encoder.parameters())
             +list(decoder.parameters())
             +list(criterion.parameters())
-            +list(nmvm.parameters())
+            +list(self.nmvm.parameters())
         ),
         lr=lr
     )
@@ -254,14 +254,14 @@ class LatentSpaceModel(LatentSpaceVol):
     train_loader = DataLoader(
       dataset,
       batch_size=batch_size,
-      shuffle=False,
+      shuffle=True,
       num_workers=4,
       pin_memory=True
     )
 
-    epoch_loss = []
-
     for epoch in range(epochs):
+        epoch_loss = []
+
         for x, y, xi in tqdm(train_loader):
 
           x = x.to(device)
@@ -271,9 +271,10 @@ class LatentSpaceModel(LatentSpaceVol):
           optimizer.zero_grad()
 
           z_real = encoder(x)
+          self.n = z_real.shape[0]
           y_pred = decoder(z_real)
-          z_sim = nmvm.sample(z_real.shape[0])
-          nmvm_params = nmvm._params
+          z_sim = self.nmvm.sample()
+          nmvm_params = self.nmvm._params
 
 
           loss = criterion(
@@ -281,7 +282,7 @@ class LatentSpaceModel(LatentSpaceVol):
               y_pred=y_pred,
               xi_target=xi,
               nmvm_params=nmvm_params,
-              z_sim=z_sim
+              z_real=z_real
           )
 
           loss.backward()
