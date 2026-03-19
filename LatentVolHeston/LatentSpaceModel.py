@@ -32,6 +32,7 @@ class DataStore(Dataset):
 
       return (x, y, xi_target)
 
+
 class Encoder(nn.Module):
     def __init__(self, model_params: dict):
         super().__init__()
@@ -90,7 +91,7 @@ class Decoder(nn.Module):
     )
 
   def forward(self, z_t):
-    return self.decoder(z_t)
+    return nn.functional.softplus(self.decoder(z_t))
 
 
 class NMVM(nn.Module):
@@ -123,18 +124,26 @@ class NMVM(nn.Module):
         "dof": 2*torch.exp(self.log_alpha)
     }
 
-  def sample(self, n):
+  def sample(self, shape):
     device = self.mu.device
     alpha = torch.exp(self.log_alpha)
     theta = torch.exp(self.log_theta)
 
     self.L = self._get_L()
+
     gamma = dist.InverseGamma(alpha, 1/theta)
-    W = gamma.sample((n,)).to(device)
+    W = gamma.sample(shape).to(device)
 
-    eps = torch.randn(n, self.dim, device=device)
+    eps = torch.randn(*shape, self.dim, device=device)
 
-    X = self.mu + self.beta*W.unsqueeze(-1) + torch.sqrt(W).unsqueeze(-1)*(eps @ self.L.T)
+    mu = self.mu.view(1, 1, -1)
+    beta = self.beta.view(1, 1, -1)
+
+    X = (
+          self.mu
+          + self.beta*W.unsqueeze(-1)
+          + torch.sqrt(W).unsqueeze(-1)*(eps @ self.L.T)
+        )
 
     return X
 
@@ -172,7 +181,7 @@ class CompositeLoss(nn.Module):
 
   def prior_loss(self, z, mu, L):
     B, T, D = z.shape
-    z_flat = z.reshape(-1, D)  
+    z_flat = z.reshape(-1, D)
     diff = (z_flat-mu).T
     solved = torch.linalg.solve_triangular(L, diff, upper=False)
     loss = torch.mean(torch.sum(solved**2, dim=0))
@@ -203,6 +212,8 @@ class CompositeLoss(nn.Module):
     weights = torch.softmax(log_vars, dim=0)
     total_loss = torch.sum(weights * torch.stack(losses))
     return total_loss
+
+
       
 class LatentSpaceModel(LatentSpaceVol):
   def __init__(self, feature_params, model_params):
@@ -228,10 +239,17 @@ class LatentSpaceModel(LatentSpaceVol):
       self.data.to_parquet(filename)
 
   def sample(self, num_paths, num_steps, to_numpy=True):
-    z_sim = self.nmvm.sample(num_paths*num_steps)
-    y_flat = self.decoder(z_sim)
-    output_dim = y_flat.shape[-1]
-    y_sim = y_flat.view(num_paths, num_steps)
+    shape = (num_paths, num_steps)
+    z_sim = self.nmvm.sample(shape)
+
+    B, T, D = z_sim.shape
+
+    z_flat = z_sim.reshape(-1, D)
+
+    y_flat = self.decoder(z_flat)
+
+    y_sim = y_flat.view(B, T)
+
     return y_sim.detach().cpu().numpy() if to_numpy else y_sim
 
   def fit(self):
@@ -279,7 +297,7 @@ class LatentSpaceModel(LatentSpaceVol):
           z_real = encoder(x)
           self.n = z_real.shape[0]
           y_pred = self.decoder(z_real)
-          z_sim = self.nmvm.sample(self.n)
+          z_sim = self.nmvm.sample((self.n, ))
           nmvm_params = self.nmvm._params
 
 
@@ -297,4 +315,3 @@ class LatentSpaceModel(LatentSpaceVol):
           epoch_loss.append(loss.item())
 
         print(f"Epoch: {epoch+1}, Train Loss: {sum(epoch_loss)/len(epoch_loss)}")
-
