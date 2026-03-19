@@ -1,20 +1,51 @@
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from arch import arch_model
+import matplotlib.pyplot as plt
+import pandas as pd
+from typing import List, Dict, Optional
+import yfinance as yf
+from scipy.stats import genpareto
+from dataclasses import dataclass
+import math
+import datetime
+
 @dataclass
 class Params:
   ticker: str
   start: str
   end: str
   vol_window: int = 20
-  T: float = 1/252
+  T: float = 252
   garch_window: int = 60
   tcm_window: int = 150
   q: float = 0.90
   pct: float = 0.95
   bounds = [(-1, 2), (1e-6, None)]
+  estimate_mu: bool = False
+  mu: float = 0.0
+  market_ticker: str = "^GSPC"
+  r_f: float = 0.05
 
 class LatentSpaceVol:
   def __init__(self, feature_params, **kwargs):
     self.params = feature_params
-    
+
+  def estimate_mu(self):
+    market_data = yf.Ticker(self.params.market_ticker).history(
+        start=self.params.end-datetime.timedelta(days=252),
+        end=self.params.end, auto_adjust=False
+    )[["Close"]]
+
+    R_i = self.data["Close"]
+    R_m = market_data["Close"].pct_change()
+    beta = (R_i.cov(R_m) / R_m.var())
+    premium = R_m.mean() - self.r_f
+
+    mu = self.r_f + beta*premuim
+    return (1+mu)**(1/self.T) - 1
+
+
   def get_price_data(self):
     self.data = yf.Ticker(self.params.ticker).history(start=self.params.start, end=self.params.end, auto_adjust=False)[["Close"]]
 
@@ -110,6 +141,9 @@ class LatentSpaceVol:
     tcm_cols = ["Xi", "CTE", "TV", "Skew", "Kurt"]
     tcm = pd.DataFrame(index=self.data.index, columns=tcm_cols)
 
+    if self.params.estimate_mu:
+      self.params.mu = self.estimate_mu()
+
     for i in range(self.params.tcm_window, len(r)):
       window = r.iloc[i - self.params.tcm_window:i].dropna()
       tcm.iloc[i] = self.get_tail_data(window)
@@ -132,3 +166,4 @@ class LatentSpaceVol:
 
 
     self.df_normalized = self.normalize(self.data)
+
