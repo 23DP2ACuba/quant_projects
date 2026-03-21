@@ -39,5 +39,3 @@ class LatentVolSimulation:
     V_0 = erT * np.mean(np.maximum(S_T-K, 0))
 
     return V_0
-
-
