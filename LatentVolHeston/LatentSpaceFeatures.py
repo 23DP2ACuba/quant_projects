@@ -26,6 +26,7 @@ class Params:
   mu: float = 0.0
   market_ticker: str = "^GSPC"
   r_f: float = 0.05
+  S0: float = 0.0
 
 class LatentSpaceVol:
   def __init__(self, feature_params, **kwargs):
@@ -33,21 +34,29 @@ class LatentSpaceVol:
 
   def estimate_mu(self):
     market_data = yf.Ticker(self.params.market_ticker).history(
-        start=self.params.end-datetime.timedelta(days=252),
+        start=datetime.datetime.strptime(self.params.end, "%Y-%m-%d")-datetime.timedelta(days=252),
         end=self.params.end, auto_adjust=False
     )[["Close"]]
 
     R_i = self.data["Close"]
     R_m = market_data["Close"].pct_change()
     beta = (R_i.cov(R_m) / R_m.var())
-    premium = R_m.mean() - self.r_f
+    premium = R_m.mean() - self.params.r_f
 
-    mu = self.r_f + beta*premuim
-    return (1+mu)**(1/self.T) - 1
+
+    mu = self.params.r_f + beta*premium
+    mu = (1+mu)**(1/self.params.T) - 1
+
+    return mu
 
 
   def get_price_data(self):
     self.data = yf.Ticker(self.params.ticker).history(start=self.params.start, end=self.params.end, auto_adjust=False)[["Close"]]
+    self.S0 = self.data["Close"].iloc[-1]
+
+    if self.params.estimate_mu:
+      self.params.mu = self.estimate_mu()
+      print(self.params.mu)
 
   def get_tail_data(self, returns):
     L = np.abs(returns[returns < 0])
@@ -125,7 +134,7 @@ class LatentSpaceVol:
     df_scaled = pd.DataFrame(scaler.fit_transform(df), columns=df.columns, index=df.index)
     return df_scaled
 
-  def generate_features(self):
+  def generate_features(self):    
     eps = 1e-5
     r = self.data["Close"].pct_change()
     r2 = r**2
@@ -139,10 +148,7 @@ class LatentSpaceVol:
     print("caculating tcm:")
     step = np.floor(len(r)/15)
     tcm_cols = ["Xi", "CTE", "TV", "Skew", "Kurt"]
-    tcm = pd.DataFrame(index=self.data.index, columns=tcm_cols)
-
-    if self.params.estimate_mu:
-      self.params.mu = self.estimate_mu()
+    tcm = pd.DataFrame(index=self.data.index, columns=tcm_cols)   
 
     for i in range(self.params.tcm_window, len(r)):
       window = r.iloc[i - self.params.tcm_window:i].dropna()
@@ -166,4 +172,14 @@ class LatentSpaceVol:
 
 
     self.df_normalized = self.normalize(self.data)
+    self.data = self.df_normalized
 
+  def load_or_generate_features(self):
+    filename = f"features_{self.params.ticker}.parquet"
+    if os.path.exists(filename):
+      self.data = pd.read_parquet(filename)
+
+    else:
+      self.get_price_data()
+      self.generate_features()
+      self.data.to_parquet(filename)
