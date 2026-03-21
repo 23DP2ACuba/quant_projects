@@ -102,6 +102,8 @@ class NMVM(nn.Module):
     self.mu = nn.Parameter(torch.zeros(dim))
     self.beta = nn.Parameter(torch.zeros(dim))
 
+    self.lambda_q = nn.Parameter(torch.zeros(dim))
+
     self.L_unconstrained = nn.Parameter(torch.eye(dim))
 
     self.log_alpha = nn.Parameter(torch.tensor(0.0))
@@ -147,6 +149,10 @@ class NMVM(nn.Module):
 
     return X
 
+  def sample_Q(self, shape):
+    z = self.sample(shape)
+    return z - self.lambda_q
+
 class CompositeLoss(nn.Module):
   def __init__(self):
     super().__init__()
@@ -187,7 +193,10 @@ class CompositeLoss(nn.Module):
     loss = torch.mean(torch.sum(solved**2, dim=0))
     return loss
 
-  def forward(self, y_true, y_pred, z_real, nmvm_params, xi_target, z_sim):
+  def martingale_loss(self, S_T):
+    return torch.mean(S_T) - self.params.S0*torch.exp(self.params.r_f*self.params.T)
+
+  def forward(self, y_true, y_pred, z_real, nmvm_params, xi_target, z_sim, S_T):
     L = nmvm_params.get("L")
     mu = nmvm_params.get("mu")
     nu = nmvm_params.get("dof")
@@ -205,14 +214,15 @@ class CompositeLoss(nn.Module):
     losses.append(self.prior_loss(z_real, mu, L))
     losses.append(self.latent_match_loss(z_sim, z_real))
 
+    Q_loss = self.martingale_loss(S_T)
+
     if any(i.isnan() for i in losses):
       print(losses)
 
     log_vars = torch.clamp(self.log_vars, -5, 5)
     weights = torch.softmax(log_vars, dim=0)
     total_loss = torch.sum(weights * torch.stack(losses))
-    return total_loss
-
+    return total_loss, Q_loss
 
       
 class LatentSpaceModel(LatentSpaceVol):
@@ -228,17 +238,7 @@ class LatentSpaceModel(LatentSpaceVol):
     self.train_settings = model_params["train_settings"]
     self.seq_len = model_params["model_params"]["seq_len"]
 
-  def load_or_generate_features(self):
-    filename = f"features_{self.params.ticker}.parquet"
-    if os.path.exists(filename):
-      self.data = pd.read_parquet(filename)
-
-    else:
-      self.get_price_data()
-      self.generate_features()
-      self.data.to_parquet(filename)
-
-  def sample(self, num_paths, num_steps, to_numpy=True):
+  def sample(self, num_paths, num_steps, to_numpy=True, Q=False):
     shape = (num_paths, num_steps)
     z_sim = self.nmvm.sample(shape)
 
@@ -253,6 +253,8 @@ class LatentSpaceModel(LatentSpaceVol):
     return y_sim.detach().cpu().numpy() if to_numpy else y_sim
 
   def fit(self):
+    self.n_steps = self.train_settings["n_steps"]
+    self.n_paths = self.train_settings["n_paths"]
     epochs = self.train_settings["epochs"]
     device = self.train_settings["device"]
     lr = self.train_settings["lr"]
@@ -284,6 +286,7 @@ class LatentSpaceModel(LatentSpaceVol):
     )
 
     for epoch in range(epochs):
+        lambda_rn = min(1.0, epoch/epochs)
         epoch_loss = []
 
         for x, y, xi in tqdm(train_loader):
@@ -298,18 +301,20 @@ class LatentSpaceModel(LatentSpaceVol):
           self.n = z_real.shape[0]
           y_pred = self.decoder(z_real)
           z_sim = self.nmvm.sample((self.n, ))
+          S = self.nmvm.sample((self.n_paths, self.n_steps))
           nmvm_params = self.nmvm._params
 
 
-          loss = criterion(
+          loss, Q_loss = criterion(
               y_true=y,
               y_pred=y_pred,
               xi_target=xi,
               nmvm_params=nmvm_params,
               z_real=z_real,
-              z_sim=z_sim
+              z_sim=z_sim,
+              S = S
           )
-
+          loss += lambda_rn * Q_loss
           loss.backward()
           optimizer.step()
           epoch_loss.append(loss.item())
