@@ -154,11 +154,11 @@ class NMVM(nn.Module):
     return z - self.lambda_q
 
 class CompositeLoss(nn.Module):
-  def __init__(self):
+  def __init__(self, risk_free_S0, losses=["rec", "smooth", "EVT", "conservative", "metric", "prior", "latent_match", "martingale"]):
     super().__init__()
 
-    losses = ["rec", "smooth", "EVT", "conservative", "metric", "prior", "latent_match"]
     self.num_losses = len(losses)
+    self.risk_free_S0 = risk_free_S0
 
     self.log_vars = nn.Parameter(torch.ones(self.num_losses) * 0.1)
 
@@ -194,7 +194,7 @@ class CompositeLoss(nn.Module):
     return loss
 
   def martingale_loss(self, S_T):
-    return torch.mean(S_T) - self.params.S0*torch.exp(self.params.r_f*self.params.T)
+    return (torch.mean(S_T) - self.risk_free_S0)**2
 
   def forward(self, y_true, y_pred, z_real, nmvm_params, xi_target, z_sim, S_T):
     L = nmvm_params.get("L")
@@ -213,8 +213,7 @@ class CompositeLoss(nn.Module):
     losses.append(self.conservative_loss(y_pred, y_true))
     losses.append(self.prior_loss(z_real, mu, L))
     losses.append(self.latent_match_loss(z_sim, z_real))
-
-    Q_loss = self.martingale_loss(S_T)
+    losses.append(self.martingale_loss(S_T))
 
     if any(i.isnan() for i in losses):
       print(losses)
@@ -222,7 +221,7 @@ class CompositeLoss(nn.Module):
     log_vars = torch.clamp(self.log_vars, -5, 5)
     weights = torch.softmax(log_vars, dim=0)
     total_loss = torch.sum(weights * torch.stack(losses))
-    return total_loss, Q_loss
+    return total_loss
 
       
 class LatentSpaceModel(LatentSpaceVol):
@@ -240,7 +239,7 @@ class LatentSpaceModel(LatentSpaceVol):
 
   def sample(self, num_paths, num_steps, to_numpy=True, Q=False):
     shape = (num_paths, num_steps)
-    z_sim = self.nmvm.sample(shape)
+    z_sim = self.nmvm.sample_Q(shape)
 
     B, T, D = z_sim.shape
 
@@ -248,7 +247,7 @@ class LatentSpaceModel(LatentSpaceVol):
 
     y_flat = self.decoder(z_flat)
 
-    y_sim = y_flat.view(B, T)
+    y_sim = np.exp(y_flat.view(B, T))
 
     return y_sim.detach().cpu().numpy() if to_numpy else y_sim
 
@@ -263,7 +262,9 @@ class LatentSpaceModel(LatentSpaceVol):
     encoder = Encoder(self.encoder_params).to(device)
     self.decoder = Decoder(self.decoder_params).to(device)
     self.nmvm = NMVM(self.decoder_params["latent_dim"]).to(device)
-    criterion = CompositeLoss().to(device)
+    risk_free_S0 = self.params.S0*np.exp(self.params.r_f*self.params.T)
+    criterion = CompositeLoss(risk_free_S0).to(device)
+
 
     optimizer = torch.optim.Adam(
         (
@@ -305,16 +306,16 @@ class LatentSpaceModel(LatentSpaceVol):
           nmvm_params = self.nmvm._params
 
 
-          loss, Q_loss = criterion(
+
+          loss = criterion(
               y_true=y,
               y_pred=y_pred,
               xi_target=xi,
               nmvm_params=nmvm_params,
               z_real=z_real,
               z_sim=z_sim,
-              S = S
+              S_T = S
           )
-          loss += lambda_rn * Q_loss
           loss.backward()
           optimizer.step()
           epoch_loss.append(loss.item())
